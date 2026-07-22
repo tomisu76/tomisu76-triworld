@@ -13,19 +13,21 @@ const scene = buildSyntheticScene();
 const manifest = buildSceneManifest(scene);
 const terrain = manifest.meshes.find((mesh) => mesh.role === 'terrain');
 const road = manifest.meshes.find((mesh) => mesh.role === 'road');
+const coordinateLabel = `${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`;
 
 const app = requireElement<HTMLDivElement>('#app');
 app.innerHTML = `
   <main class="shell">
     <header>
       <div>
-        <p class="eyebrow">TriWorld v0.2 · Cesium primitive renderer</p>
-        <h1>One triangle world. Every engine.</h1>
-        <p class="lede">Road-first canonical geometry in a right-handed, Z-up, metre-based local ENU frame. Cesium receives the exact indexed triangle buffers that will later feed BeamNG.</p>
+        <p class="eyebrow">TriWorld v0.3 · real map context</p>
+        <h1>One triangle world. One real location.</h1>
+        <p class="lede">The canonical terrain and road meshes are now geographically anchored above OpenStreetMap at <strong>${coordinateLabel}</strong>. Cesium still receives the exact indexed triangle buffers intended for BeamNG.</p>
       </div>
       <div class="stats">
         <span>${manifest.vertices.toLocaleString()} vertices</span>
         <span>${manifest.triangles.toLocaleString()} triangles</span>
+        <span class="good">OSM MAP</span>
         <span class="${manifest.validation.valid ? 'good' : 'bad'}">${manifest.validation.valid ? 'VALID' : 'INVALID'}</span>
       </div>
     </header>
@@ -33,6 +35,10 @@ app.innerHTML = `
     <section class="panel">
       <div class="viewport-card">
         <div id="cesiumContainer"></div>
+        <div class="location-badge">
+          <span>Geographic anchor</span>
+          <strong>${coordinateLabel}</strong>
+        </div>
         <div class="viewport-badge">Canonical mesh hash <strong>${manifest.hash}</strong></div>
       </div>
 
@@ -43,6 +49,8 @@ app.innerHTML = `
         </div>
 
         <dl>
+          <div><dt>Location</dt><dd>${coordinateLabel}</dd></div>
+          <div><dt>Map source</dt><dd>OpenStreetMap</dd></div>
           <div><dt>Frame</dt><dd>ENU / Z-up</dd></div>
           <div><dt>Units</dt><dd>metres</dd></div>
           <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
@@ -50,6 +58,16 @@ app.innerHTML = `
           <div><dt>Bounds</dt><dd>${formatBounds()}</dd></div>
         </dl>
 
+        <p class="section-label control-heading">Map context</p>
+        <div class="controls">
+          <label><input id="map" type="checkbox" checked /> Real OSM map</label>
+          <label class="range-label">
+            <span>Map opacity</span>
+            <input id="mapOpacity" type="range" min="0" max="100" value="78" />
+          </label>
+        </div>
+
+        <p class="section-label control-heading">Canonical layers</p>
         <div class="controls">
           <label><input id="terrain" type="checkbox" checked /> Terrain surface</label>
           <label><input id="road" type="checkbox" checked /> Road surface</label>
@@ -58,31 +76,38 @@ app.innerHTML = `
         </div>
 
         <div class="buttons">
-          <button id="reset" type="button">Reset camera</button>
+          <button id="localView" type="button">Local triangle view</button>
+          <button id="mapView" type="button">Map overview</button>
           <button id="download" type="button" class="primary">Download scene JSON</button>
         </div>
 
         <div class="validation ${manifest.validation.valid ? 'valid' : 'invalid'}">
           <strong>${manifest.validation.valid ? 'Geometry validation passed' : 'Geometry validation failed'}</strong>
-          <span>${manifest.validation.valid ? 'No invalid indices, degenerate faces, or inverted surface triangles.' : manifest.validation.errors.slice(0, 3).join(' · ')}</span>
+          <span>${manifest.validation.valid ? 'The map is visual context only. Canonical positions and triangle indices remain unchanged.' : manifest.validation.errors.slice(0, 3).join(' · ')}</span>
         </div>
       </aside>
     </section>
   </main>`;
 
 const renderer = createTriWorldRenderer('cesiumContainer', scene);
+const mapToggle = requireElement<HTMLInputElement>('#map');
+const mapOpacity = requireElement<HTMLInputElement>('#mapOpacity');
 const terrainToggle = requireElement<HTMLInputElement>('#terrain');
 const roadToggle = requireElement<HTMLInputElement>('#road');
 const wireToggle = requireElement<HTMLInputElement>('#wire');
 const pointToggle = requireElement<HTMLInputElement>('#points');
-const resetButton = requireElement<HTMLButtonElement>('#reset');
+const localViewButton = requireElement<HTMLButtonElement>('#localView');
+const mapViewButton = requireElement<HTMLButtonElement>('#mapView');
 const downloadButton = requireElement<HTMLButtonElement>('#download');
 
+mapToggle.addEventListener('change', () => renderer.setMapVisible(mapToggle.checked));
+mapOpacity.addEventListener('input', () => renderer.setMapOpacity(Number(mapOpacity.value) / 100));
 terrainToggle.addEventListener('change', () => renderer.setTerrainVisible(terrainToggle.checked));
 roadToggle.addEventListener('change', () => renderer.setRoadVisible(roadToggle.checked));
 wireToggle.addEventListener('change', () => renderer.setWireframeVisible(wireToggle.checked));
 pointToggle.addEventListener('change', () => renderer.setVerticesVisible(pointToggle.checked));
-resetButton.addEventListener('click', () => renderer.resetCamera());
+localViewButton.addEventListener('click', () => renderer.resetCamera());
+mapViewButton.addEventListener('click', () => renderer.showMapOverview());
 downloadButton.addEventListener('click', downloadScene);
 window.addEventListener('beforeunload', () => renderer.destroy(), { once: true });
 
