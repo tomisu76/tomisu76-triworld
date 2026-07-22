@@ -61,6 +61,9 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   const materials = new Map(scene.materials.map((material) => [material.id, material]));
   const surfacePrimitives = new Map<string, Primitive>();
   const wirePrimitives = new Map<string, Primitive>();
+  let terrainVisible = true;
+  let roadVisible = true;
+  let wireVisible = true;
 
   for (const mesh of scene.meshes) {
     const material = materials.get(mesh.materialId);
@@ -78,47 +81,46 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   points.show = false;
   viewer.scene.primitives.add(points);
 
-  const terrain = scene.meshes.find((mesh) => mesh.role === 'terrain');
-  const road = scene.meshes.find((mesh) => mesh.role === 'road');
+  function roleVisible(mesh: CanonicalMesh): boolean {
+    return mesh.role === 'terrain' ? terrainVisible : roadVisible;
+  }
 
-  function requestRender(): void {
+  function applyVisibility(): void {
+    for (const mesh of scene.meshes) {
+      const visible = roleVisible(mesh);
+      const surface = surfacePrimitives.get(mesh.id);
+      const wire = wirePrimitives.get(mesh.id);
+      if (surface) surface.show = visible;
+      if (wire) wire.show = visible && wireVisible;
+    }
     viewer.scene.requestRender();
   }
 
   function resetCamera(): void {
     viewer.camera.lookAtTransform(modelMatrix, new Cartesian3(175, -205, 145));
-    requestRender();
+    viewer.scene.requestRender();
   }
 
+  applyVisibility();
   resetCamera();
 
   return {
     viewer,
     setTerrainVisible(visible: boolean): void {
-      if (terrain) {
-        const primitive = surfacePrimitives.get(terrain.id);
-        const wire = wirePrimitives.get(terrain.id);
-        if (primitive) primitive.show = visible;
-        if (wire) wire.show = visible && wire.show;
-      }
-      requestRender();
+      terrainVisible = visible;
+      applyVisibility();
     },
     setRoadVisible(visible: boolean): void {
-      if (road) {
-        const primitive = surfacePrimitives.get(road.id);
-        const wire = wirePrimitives.get(road.id);
-        if (primitive) primitive.show = visible;
-        if (wire) wire.show = visible && wire.show;
-      }
-      requestRender();
+      roadVisible = visible;
+      applyVisibility();
     },
     setWireframeVisible(visible: boolean): void {
-      for (const primitive of wirePrimitives.values()) primitive.show = visible;
-      requestRender();
+      wireVisible = visible;
+      applyVisibility();
     },
     setVerticesVisible(visible: boolean): void {
       points.show = visible;
-      requestRender();
+      viewer.scene.requestRender();
     },
     resetCamera,
     destroy(): void {
@@ -129,7 +131,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
 
 function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial, modelMatrix: Matrix4): Primitive {
   const geometry = createGeometry(mesh.positions, mesh.indices, PrimitiveType.TRIANGLES);
-  const color = new Color(...material.color);
+  const color = new Color(material.color[0], material.color[1], material.color[2], material.color[3]);
 
   return new Primitive({
     geometryInstances: new GeometryInstance({
@@ -176,7 +178,7 @@ function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primiti
   });
 }
 
-function createGeometry(positions: number[], indices: number[], primitiveType: PrimitiveType): Geometry {
+function createGeometry(positions: number[], indices: number[], primitiveType: number): Geometry {
   const values = new Float64Array(positions);
   const vertexCount = positions.length / 3;
 
@@ -190,7 +192,7 @@ function createGeometry(positions: number[], indices: number[], primitiveType: P
     },
     indices: IndexDatatype.createTypedArray(vertexCount, indices),
     primitiveType,
-    boundingSphere: BoundingSphere.fromVertices(values),
+    boundingSphere: BoundingSphere.fromVertices(positions),
   });
 }
 
