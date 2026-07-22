@@ -1,6 +1,6 @@
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './styles.css';
-import { buildSceneManifest, buildSyntheticScene, serializeScene } from './core';
+import { buildSceneManifest, buildSyntheticScene, serializeScene, type CanonicalScene } from './core';
 import { createTriWorldRenderer } from './cesium-renderer';
 import { buildOsmScene, type OsmSceneStats } from './osm-scene';
 
@@ -23,7 +23,7 @@ app.innerHTML = `
 
 let osmStats: OsmSceneStats | null = null;
 let sourceError: string | null = null;
-let scene;
+let scene: CanonicalScene;
 
 try {
   const result = await buildOsmScene();
