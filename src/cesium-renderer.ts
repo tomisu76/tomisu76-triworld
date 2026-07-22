@@ -1,5 +1,6 @@
 import {
   BoundingSphere,
+  Cartesian2,
   Cartesian3,
   Color,
   ColorGeometryInstanceAttribute,
@@ -9,7 +10,10 @@ import {
   GeometryAttribute,
   GeometryAttributes,
   GeometryInstance,
+  ImageryLayer,
+  Math as CesiumMath,
   Matrix4,
+  OpenStreetMapImageryProvider,
   PerInstanceColorAppearance,
   PointPrimitiveCollection,
   Primitive,
@@ -21,11 +25,14 @@ import type { CanonicalMaterial, CanonicalMesh, CanonicalScene } from './core';
 
 export interface TriWorldRenderer {
   viewer: Viewer;
+  setMapVisible(visible: boolean): void;
+  setMapOpacity(opacity: number): void;
   setTerrainVisible(visible: boolean): void;
   setRoadVisible(visible: boolean): void;
   setWireframeVisible(visible: boolean): void;
   setVerticesVisible(visible: boolean): void;
   resetCamera(): void;
+  showMapOverview(): void;
   destroy(): void;
 }
 
@@ -47,7 +54,18 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     requestRenderMode: true,
   });
 
-  viewer.scene.globe.show = false;
+  const osmLayer = new ImageryLayer(
+    new OpenStreetMapImageryProvider({
+      url: 'https://tile.openstreetmap.org/',
+      maximumLevel: 19,
+    }),
+  );
+  osmLayer.alpha = 0.78;
+  viewer.imageryLayers.add(osmLayer);
+
+  viewer.scene.globe.show = true;
+  viewer.scene.globe.depthTestAgainstTerrain = false;
+  viewer.scene.globe.baseColor = Color.fromCssColorString('#162238');
   if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
   if (viewer.scene.sun) viewer.scene.sun.show = false;
   if (viewer.scene.moon) viewer.scene.moon.show = false;
@@ -61,6 +79,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   const materials = new Map(scene.materials.map((material) => [material.id, material]));
   const surfacePrimitives = new Map<string, Primitive>();
   const wirePrimitives = new Map<string, Primitive>();
+  let mapVisible = true;
   let terrainVisible = true;
   let roadVisible = true;
   let wireVisible = true;
@@ -81,11 +100,40 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   points.show = false;
   viewer.scene.primitives.add(points);
 
+  const anchorEntity = viewer.entities.add({
+    id: 'triworld-anchor',
+    position: Cartesian3.fromDegrees(
+      scene.anchor.longitude,
+      scene.anchor.latitude,
+      scene.anchor.height + 12,
+    ),
+    point: {
+      pixelSize: 13,
+      color: Color.fromCssColorString('#ff3eae'),
+      outlineColor: Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: `TriWorld anchor\n${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`,
+      font: '13px Inter, sans-serif',
+      fillColor: Color.WHITE,
+      showBackground: true,
+      backgroundColor: Color.fromCssColorString('#07111f').withAlpha(0.82),
+      pixelOffset: new Cartesian2(0, -34),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
   function roleVisible(mesh: CanonicalMesh): boolean {
     return mesh.role === 'terrain' ? terrainVisible : roadVisible;
   }
 
   function applyVisibility(): void {
+    viewer.scene.globe.show = mapVisible;
+    osmLayer.show = mapVisible;
+    anchorEntity.show = mapVisible;
+
     for (const mesh of scene.meshes) {
       const visible = roleVisible(mesh);
       const surface = surfacePrimitives.get(mesh.id);
@@ -101,11 +149,36 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     viewer.scene.requestRender();
   }
 
+  function showMapOverview(): void {
+    viewer.camera.lookAtTransform(Matrix4.IDENTITY);
+    void viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(
+        scene.anchor.longitude,
+        scene.anchor.latitude,
+        1450,
+      ),
+      orientation: {
+        heading: 0,
+        pitch: CesiumMath.toRadians(-76),
+        roll: 0,
+      },
+      duration: 1.1,
+    });
+  }
+
   applyVisibility();
   resetCamera();
 
   return {
     viewer,
+    setMapVisible(visible: boolean): void {
+      mapVisible = visible;
+      applyVisibility();
+    },
+    setMapOpacity(opacity: number): void {
+      osmLayer.alpha = Math.max(0, Math.min(1, opacity));
+      viewer.scene.requestRender();
+    },
     setTerrainVisible(visible: boolean): void {
       terrainVisible = visible;
       applyVisibility();
@@ -123,6 +196,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       viewer.scene.requestRender();
     },
     resetCamera,
+    showMapOverview,
     destroy(): void {
       if (!viewer.isDestroyed()) viewer.destroy();
     },
