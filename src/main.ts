@@ -9,12 +9,16 @@ type CanonicalMesh = {
   indices: number[];
 };
 
+function requireElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing element: ${selector}`);
+  return element;
+}
+
 const terrain = buildTerrain();
 const road = buildRoad();
 
-const app = document.querySelector<HTMLDivElement>('#app');
-if (!app) throw new Error('Missing #app');
-
+const app = requireElement<HTMLDivElement>('#app');
 app.innerHTML = `
   <main class="shell">
     <header>
@@ -45,13 +49,12 @@ app.innerHTML = `
     </section>
   </main>`;
 
-const canvas = document.querySelector<HTMLCanvasElement>('#view');
-const wire = document.querySelector<HTMLInputElement>('#wire');
-const points = document.querySelector<HTMLInputElement>('#points');
-if (!canvas || !wire || !points) throw new Error('Missing controls');
-
-const ctx = canvas.getContext('2d');
-if (!ctx) throw new Error('Canvas 2D unavailable');
+const canvas = requireElement<HTMLCanvasElement>('#view');
+const wire = requireElement<HTMLInputElement>('#wire');
+const points = requireElement<HTMLInputElement>('#points');
+const context = canvas.getContext('2d');
+if (!context) throw new Error('Canvas 2D unavailable');
+const ctx: CanvasRenderingContext2D = context;
 
 function buildTerrain(): CanonicalMesh {
   const size = 22;
