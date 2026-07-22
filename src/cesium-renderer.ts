@@ -2,6 +2,7 @@ import {
   BoundingSphere,
   Cartesian2,
   Cartesian3,
+  Cartographic,
   Color,
   ColorGeometryInstanceAttribute,
   ComponentDatatype,
@@ -18,10 +19,19 @@ import {
   PointPrimitiveCollection,
   Primitive,
   PrimitiveType,
+  Rectangle,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
   Transforms,
   Viewer,
 } from 'cesium';
 import type { CanonicalMaterial, CanonicalMesh, CanonicalScene } from './core';
+
+export interface MapSquareSelection {
+  latitude: number;
+  longitude: number;
+  sizeMetres: number;
+}
 
 export interface TriWorldRenderer {
   viewer: Viewer;
@@ -31,6 +41,12 @@ export interface TriWorldRenderer {
   setRoadVisible(visible: boolean): void;
   setWireframeVisible(visible: boolean): void;
   setVerticesVisible(visible: boolean): void;
+  setAreaSelection(selection: MapSquareSelection): void;
+  beginAreaSelection(
+    onPreview: (selection: MapSquareSelection) => void,
+    onComplete: (selection: MapSquareSelection) => void,
+  ): void;
+  cancelAreaSelection(): void;
   resetCamera(): void;
   showMapOverview(): void;
   destroy(): void;
@@ -86,6 +102,14 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   let terrainVisible = true;
   let roadVisible = true;
   let wireVisible = true;
+  let currentSelection: MapSquareSelection = {
+    latitude: scene.anchor.latitude,
+    longitude: scene.anchor.longitude,
+    sizeMetres: Math.min(2000, Math.max(250, metrics.planSize)),
+  };
+  let selectionHandler: ScreenSpaceEventHandler | null = null;
+  let selectionStart: GeographicPoint | null = null;
+  let previewSelection: MapSquareSelection | null = null;
 
   for (const mesh of scene.meshes) {
     const material = materials.get(mesh.materialId);
@@ -118,13 +142,24 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
-      text: `TriWorld anchor\n${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`,
+      text: `Compiled scene anchor\n${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`,
       font: '13px Inter, sans-serif',
       fillColor: Color.WHITE,
       showBackground: true,
       backgroundColor: Color.fromCssColorString('#07111f').withAlpha(0.82),
       pixelOffset: new Cartesian2(0, -34),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  const selectionEntity = viewer.entities.add({
+    id: 'triworld-processing-square',
+    rectangle: {
+      coordinates: selectionToRectangle(currentSelection),
+      material: Color.fromCssColorString('#22d3ee').withAlpha(0.18),
+      outline: true,
+      outlineColor: Color.fromCssColorString('#b7f7ff'),
+      height: 2,
     },
   });
 
@@ -136,6 +171,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     viewer.scene.globe.show = mapVisible;
     osmLayer.show = mapVisible;
     anchorEntity.show = mapVisible;
+    selectionEntity.show = mapVisible;
 
     for (const mesh of scene.meshes) {
       const visible = roleVisible(mesh);
@@ -145,6 +181,86 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       if (wire) wire.show = visible && wireVisible;
     }
     viewer.scene.requestRender();
+  }
+
+  function setAreaSelection(selection: MapSquareSelection): void {
+    currentSelection = normalizeSelection(selection);
+    const rectangleGraphics = selectionEntity.rectangle;
+    if (rectangleGraphics) rectangleGraphics.coordinates = selectionToRectangle(currentSelection);
+    viewer.scene.requestRender();
+  }
+
+  function beginAreaSelection(
+    onPreview: (selection: MapSquareSelection) => void,
+    onComplete: (selection: MapSquareSelection) => void,
+  ): void {
+    cancelAreaSelection();
+    selectionHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+    viewer.scene.canvas.classList.add('drawing-area');
+
+    selectionHandler.setInputAction((movement: { position: Cartesian2 }) => {
+      const point = screenToGeographic(movement.position);
+      if (!point) return;
+      selectionStart = point;
+      previewSelection = null;
+      setCameraDragEnabled(false);
+    }, ScreenSpaceEventType.LEFT_DOWN);
+
+    selectionHandler.setInputAction((movement: { endPosition: Cartesian2 }) => {
+      if (!selectionStart) return;
+      const point = screenToGeographic(movement.endPosition);
+      if (!point) return;
+      previewSelection = squareFromCorners(selectionStart, point);
+      setAreaSelection(previewSelection);
+      onPreview(previewSelection);
+    }, ScreenSpaceEventType.MOUSE_MOVE);
+
+    selectionHandler.setInputAction((movement: { position: Cartesian2 }) => {
+      if (!selectionStart) return;
+      const point = screenToGeographic(movement.position) ?? selectionStart;
+      const rawDistance = geographicDistanceMetres(selectionStart, point);
+      const completed = rawDistance < 35
+        ? {
+            latitude: point.latitude,
+            longitude: point.longitude,
+            sizeMetres: currentSelection.sizeMetres,
+          }
+        : previewSelection ?? squareFromCorners(selectionStart, point);
+
+      setAreaSelection(completed);
+      onPreview(completed);
+      onComplete(completed);
+      selectionStart = null;
+      previewSelection = null;
+      setCameraDragEnabled(true);
+      cancelAreaSelection(false);
+    }, ScreenSpaceEventType.LEFT_UP);
+  }
+
+  function cancelAreaSelection(restoreCamera = true): void {
+    if (selectionHandler && !selectionHandler.isDestroyed()) selectionHandler.destroy();
+    selectionHandler = null;
+    selectionStart = null;
+    previewSelection = null;
+    viewer.scene.canvas.classList.remove('drawing-area');
+    if (restoreCamera) setCameraDragEnabled(true);
+  }
+
+  function setCameraDragEnabled(enabled: boolean): void {
+    const controller = viewer.scene.screenSpaceCameraController;
+    controller.enableRotate = enabled;
+    controller.enableTranslate = enabled;
+    controller.enableTilt = enabled;
+  }
+
+  function screenToGeographic(position: Cartesian2): GeographicPoint | null {
+    const cartesian = viewer.camera.pickEllipsoid(position, viewer.scene.globe.ellipsoid);
+    if (!cartesian) return null;
+    const cartographic = Cartographic.fromCartesian(cartesian);
+    return {
+      longitude: CesiumMath.toDegrees(cartographic.longitude),
+      latitude: CesiumMath.toDegrees(cartographic.latitude),
+    };
   }
 
   function resetCamera(): void {
@@ -159,16 +275,16 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     viewer.camera.lookAtTransform(Matrix4.IDENTITY);
     void viewer.camera.flyTo({
       destination: Cartesian3.fromDegrees(
-        scene.anchor.longitude,
-        scene.anchor.latitude,
-        Math.max(1450, metrics.radius * 3.1),
+        currentSelection.longitude,
+        currentSelection.latitude,
+        Math.max(1450, currentSelection.sizeMetres * 1.65),
       ),
       orientation: {
         heading: 0,
-        pitch: CesiumMath.toRadians(-76),
+        pitch: CesiumMath.toRadians(-86),
         roll: 0,
       },
-      duration: 1.1,
+      duration: 0.9,
     });
   }
 
@@ -201,12 +317,74 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       points.show = visible;
       viewer.scene.requestRender();
     },
+    setAreaSelection,
+    beginAreaSelection,
+    cancelAreaSelection,
     resetCamera,
     showMapOverview,
     destroy(): void {
+      cancelAreaSelection();
       if (!viewer.isDestroyed()) viewer.destroy();
     },
   };
+}
+
+type GeographicPoint = {
+  latitude: number;
+  longitude: number;
+};
+
+function normalizeSelection(selection: MapSquareSelection): MapSquareSelection {
+  return {
+    latitude: Math.max(-85, Math.min(85, selection.latitude)),
+    longitude: wrapLongitude(selection.longitude),
+    sizeMetres: Math.max(250, Math.min(2000, Math.round(selection.sizeMetres))),
+  };
+}
+
+function squareFromCorners(start: GeographicPoint, end: GeographicPoint): MapSquareSelection {
+  const metresPerDegreeLatitude = 111_320;
+  const meanLatitude = (start.latitude + end.latitude) / 2;
+  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.max(0.05, Math.cos(CesiumMath.toRadians(meanLatitude)));
+  const dx = (end.longitude - start.longitude) * metresPerDegreeLongitude;
+  const dy = (end.latitude - start.latitude) * metresPerDegreeLatitude;
+  const side = Math.max(250, Math.min(2000, Math.max(Math.abs(dx), Math.abs(dy))));
+  const signedX = (dx < 0 ? -1 : 1) * side;
+  const signedY = (dy < 0 ? -1 : 1) * side;
+
+  return normalizeSelection({
+    longitude: start.longitude + signedX / metresPerDegreeLongitude / 2,
+    latitude: start.latitude + signedY / metresPerDegreeLatitude / 2,
+    sizeMetres: side,
+  });
+}
+
+function geographicDistanceMetres(a: GeographicPoint, b: GeographicPoint): number {
+  const metresPerDegreeLatitude = 111_320;
+  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.max(0.05, Math.cos(CesiumMath.toRadians((a.latitude + b.latitude) / 2)));
+  return Math.hypot(
+    (b.longitude - a.longitude) * metresPerDegreeLongitude,
+    (b.latitude - a.latitude) * metresPerDegreeLatitude,
+  );
+}
+
+function selectionToRectangle(selection: MapSquareSelection): Rectangle {
+  const half = selection.sizeMetres / 2;
+  const metresPerDegreeLatitude = 111_320;
+  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.max(0.05, Math.cos(CesiumMath.toRadians(selection.latitude)));
+  const latitudeDelta = half / metresPerDegreeLatitude;
+  const longitudeDelta = half / metresPerDegreeLongitude;
+
+  return Rectangle.fromDegrees(
+    selection.longitude - longitudeDelta,
+    selection.latitude - latitudeDelta,
+    selection.longitude + longitudeDelta,
+    selection.latitude + latitudeDelta,
+  );
+}
+
+function wrapLongitude(value: number): number {
+  return ((((value + 180) % 360) + 360) % 360) - 180;
 }
 
 function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial, modelMatrix: Matrix4): Primitive {
@@ -328,7 +506,7 @@ function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): Poin
   return collection;
 }
 
-function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; verticalOffset: number } {
+function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; verticalOffset: number; planSize: number } {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -352,5 +530,6 @@ function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; vertica
   const height = maxZ - minZ;
   const radius = Math.max(90, Math.hypot(width, depth, height) * 0.56);
   const verticalOffset = Math.max(2, 3 - minZ);
-  return { radius, verticalOffset };
+  const planSize = Math.max(width, depth);
+  return { radius, verticalOffset, planSize };
 }
