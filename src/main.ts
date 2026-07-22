@@ -134,11 +134,16 @@ canvas.addEventListener('pointermove', (event) => {
   lastY = event.clientY;
   draw();
 });
-canvas.addEventListener('wheel', (event) => {
-  event.preventDefault();
-  camera.scale = Math.max(2.8, Math.min(12, camera.scale * (event.deltaY > 0 ? 0.9 : 1.1)));
-  draw();
-}, { passive: false });
+canvas.addEventListener(
+  'wheel',
+  (event) => {
+    event.preventDefault();
+    const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
+    camera.scale = Math.max(2.8, Math.min(12, camera.scale * zoomFactor));
+    draw();
+  },
+  { passive: false },
+);
 wire.addEventListener('change', draw);
 points.addEventListener('change', draw);
 
