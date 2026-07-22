@@ -2,7 +2,12 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './styles.css';
 import { buildSceneManifest, buildSyntheticScene, serializeScene, type CanonicalScene } from './core';
 import { createTriWorldRenderer } from './cesium-renderer';
-import { buildOsmScene, type OsmSceneStats } from './osm-scene';
+import {
+  buildOsmScene,
+  DEFAULT_OSM_SCENE_OPTIONS,
+  type OsmSceneOptions,
+  type OsmSceneStats,
+} from './osm-scene';
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -10,13 +15,14 @@ function requireElement<T extends Element>(selector: string): T {
   return element;
 }
 
+const selectedArea = readSceneOptions();
 const app = requireElement<HTMLDivElement>('#app');
 app.innerHTML = `
   <main class="loading-screen">
     <div class="loading-card">
-      <p class="eyebrow">TriWorld v0.4</p>
-      <h1>Compiling the real road network…</h1>
-      <p>Downloading the current OpenStreetMap elements for the 1 × 1 km site and converting highway centre-lines into canonical indexed triangles.</p>
+      <p class="eyebrow">TriWorld v0.5</p>
+      <h1>Compiling the selected road network…</h1>
+      <p>Downloading OpenStreetMap elements around ${selectedArea.latitude.toFixed(7)}, ${selectedArea.longitude.toFixed(7)} and converting highway centre-lines into canonical indexed triangles.</p>
       <div class="loading-bar"><span></span></div>
     </div>
   </main>`;
@@ -26,12 +32,21 @@ let sourceError: string | null = null;
 let scene: CanonicalScene;
 
 try {
-  const result = await buildOsmScene();
+  const result = await buildOsmScene(selectedArea);
   scene = result.scene;
   osmStats = result.stats;
 } catch (error) {
   sourceError = error instanceof Error ? error.message : 'Unknown OpenStreetMap loading error';
-  scene = buildSyntheticScene();
+  const fallback = buildSyntheticScene();
+  scene = {
+    ...fallback,
+    id: 'triworld-selected-area-fallback',
+    anchor: {
+      longitude: selectedArea.longitude,
+      latitude: selectedArea.latitude,
+      height: 0,
+    },
+  };
 }
 
 const manifest = buildSceneManifest(scene);
@@ -44,11 +59,11 @@ app.innerHTML = `
   <main class="shell">
     <header>
       <div>
-        <p class="eyebrow">TriWorld v0.4 · OSM road compiler</p>
-        <h1>${sourceIsLive ? 'Real roads. Canonical triangles.' : 'OSM fallback active.'}</h1>
+        <p class="eyebrow">TriWorld v0.5 · selectable OSM road compiler</p>
+        <h1>${sourceIsLive ? 'Choose a place. Compile its roads.' : 'OSM fallback active.'}</h1>
         <p class="lede">${sourceIsLive
-          ? `Driveable OpenStreetMap ways inside a 1 × 1 km site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
-          : `The live OSM request failed, so the previous synthetic diagnostic scene is shown. <strong>${escapeHtml(sourceError ?? '')}</strong>`}</p>
+          ? `Driveable OpenStreetMap ways inside a ${formatAreaSize(selectedArea.sizeMetres)} site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
+          : `The live OSM request failed, so the synthetic diagnostic scene is shown at the selected anchor. <strong>${escapeHtml(sourceError ?? '')}</strong>`}</p>
       </div>
       <div class="stats">
         <span>${manifest.vertices.toLocaleString()} vertices</span>
@@ -70,6 +85,30 @@ app.innerHTML = `
 
       <aside>
         <div>
+          <p class="section-label">Select processing area</p>
+          <form id="locationForm" class="location-form" novalidate>
+            <div class="coordinate-grid">
+              <label>
+                <span>Latitude</span>
+                <input id="latitude" name="latitude" type="number" inputmode="decimal" step="any" min="-85" max="85" value="${selectedArea.latitude}" required />
+              </label>
+              <label>
+                <span>Longitude</span>
+                <input id="longitude" name="longitude" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${selectedArea.longitude}" required />
+              </label>
+              <label class="area-size-field">
+                <span>Area size</span>
+                <select id="areaSize" name="areaSize">
+                  ${renderSizeOptions(selectedArea.sizeMetres)}
+                </select>
+              </label>
+            </div>
+            <button type="submit" class="primary">Generate selected area</button>
+            <p id="locationStatus" class="location-status">Paste coordinates from Google Maps or any GIS application.</p>
+          </form>
+        </div>
+
+        <div class="scene-heading">
           <p class="section-label">CanonicalScene</p>
           <h2>${scene.id}</h2>
         </div>
@@ -79,7 +118,7 @@ app.innerHTML = `
           <div><dt>Road source</dt><dd>${sourceIsLive ? 'OSM API v0.6' : 'Synthetic fallback'}</dd></div>
           <div><dt>Terrain source</dt><dd>${sourceIsLive ? 'Procedural preview' : 'Synthetic preview'}</dd></div>
           <div><dt>Frame</dt><dd>ENU / Z-up</dd></div>
-          <div><dt>Area</dt><dd>${sourceIsLive ? '1,000 × 1,000 m' : formatBounds()}</dd></div>
+          <div><dt>Area</dt><dd>${sourceIsLive ? formatAreaSize(selectedArea.sizeMetres) : formatBounds()}</dd></div>
           <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
           <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
           ${osmStats ? `<div><dt>OSM ways</dt><dd>${osmStats.waysImported}</dd></div>` : ''}
@@ -124,6 +163,11 @@ app.innerHTML = `
   </main>`;
 
 const renderer = createTriWorldRenderer('cesiumContainer', scene);
+const locationForm = requireElement<HTMLFormElement>('#locationForm');
+const latitudeInput = requireElement<HTMLInputElement>('#latitude');
+const longitudeInput = requireElement<HTMLInputElement>('#longitude');
+const areaSizeInput = requireElement<HTMLSelectElement>('#areaSize');
+const locationStatus = requireElement<HTMLParagraphElement>('#locationStatus');
 const mapToggle = requireElement<HTMLInputElement>('#map');
 const mapOpacity = requireElement<HTMLInputElement>('#mapOpacity');
 const terrainToggle = requireElement<HTMLInputElement>('#terrain');
@@ -133,6 +177,28 @@ const pointToggle = requireElement<HTMLInputElement>('#points');
 const localViewButton = requireElement<HTMLButtonElement>('#localView');
 const mapViewButton = requireElement<HTMLButtonElement>('#mapView');
 const downloadButton = requireElement<HTMLButtonElement>('#download');
+
+locationForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const latitude = Number(latitudeInput.value);
+  const longitude = Number(longitudeInput.value);
+  const sizeMetres = Number(areaSizeInput.value);
+  const validationError = validateSceneOptions({ latitude, longitude, sizeMetres });
+
+  if (validationError) {
+    locationStatus.textContent = validationError;
+    locationStatus.classList.add('error');
+    return;
+  }
+
+  locationStatus.textContent = 'Loading selected OpenStreetMap area…';
+  locationStatus.classList.remove('error');
+  const params = new URLSearchParams(window.location.search);
+  params.set('lat', latitude.toFixed(7));
+  params.set('lon', longitude.toFixed(7));
+  params.set('size', String(Math.round(sizeMetres)));
+  window.location.search = params.toString();
+});
 
 renderer.setMapOpacity(Number(mapOpacity.value) / 100);
 mapToggle.addEventListener('change', () => renderer.setMapVisible(mapToggle.checked));
@@ -145,6 +211,44 @@ localViewButton.addEventListener('click', () => renderer.resetCamera());
 mapViewButton.addEventListener('click', () => renderer.showMapOverview());
 downloadButton.addEventListener('click', downloadScene);
 window.addEventListener('beforeunload', () => renderer.destroy(), { once: true });
+
+function readSceneOptions(): OsmSceneOptions {
+  const params = new URLSearchParams(window.location.search);
+  const latitude = Number(params.get('lat'));
+  const longitude = Number(params.get('lon'));
+  const sizeMetres = Number(params.get('size'));
+  const candidate: OsmSceneOptions = {
+    latitude: Number.isFinite(latitude) && params.has('lat') ? latitude : DEFAULT_OSM_SCENE_OPTIONS.latitude,
+    longitude: Number.isFinite(longitude) && params.has('lon') ? longitude : DEFAULT_OSM_SCENE_OPTIONS.longitude,
+    sizeMetres: Number.isFinite(sizeMetres) && params.has('size') ? sizeMetres : DEFAULT_OSM_SCENE_OPTIONS.sizeMetres,
+  };
+  return validateSceneOptions(candidate) ? DEFAULT_OSM_SCENE_OPTIONS : candidate;
+}
+
+function validateSceneOptions(options: OsmSceneOptions): string | null {
+  if (!Number.isFinite(options.latitude) || options.latitude < -85 || options.latitude > 85) {
+    return 'Latitude must be between -85 and 85 degrees.';
+  }
+  if (!Number.isFinite(options.longitude) || options.longitude < -180 || options.longitude > 180) {
+    return 'Longitude must be between -180 and 180 degrees.';
+  }
+  if (!Number.isFinite(options.sizeMetres) || options.sizeMetres < 250 || options.sizeMetres > 2000) {
+    return 'Area size must be between 250 and 2000 metres.';
+  }
+  return null;
+}
+
+function renderSizeOptions(selectedSize: number): string {
+  return [500, 1000, 1500, 2000]
+    .map((size) => `<option value="${size}"${size === selectedSize ? ' selected' : ''}>${formatAreaSize(size)}</option>`)
+    .join('');
+}
+
+function formatAreaSize(sizeMetres: number): string {
+  const kilometres = sizeMetres / 1000;
+  const label = Number.isInteger(kilometres) ? kilometres.toFixed(0) : kilometres.toFixed(1);
+  return `${label} × ${label} km`;
+}
 
 function downloadScene(): void {
   const blob = new Blob([serializeScene(scene, manifest)], { type: 'application/json' });
