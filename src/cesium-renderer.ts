@@ -1,0 +1,247 @@
+import {
+  BoundingSphere,
+  Cartesian3,
+  Color,
+  ColorGeometryInstanceAttribute,
+  ComponentDatatype,
+  EllipsoidTerrainProvider,
+  Geometry,
+  GeometryAttribute,
+  GeometryInstance,
+  IndexDatatype,
+  Matrix4,
+  PerInstanceColorAppearance,
+  PointPrimitiveCollection,
+  Primitive,
+  PrimitiveType,
+  Transforms,
+  Viewer,
+} from 'cesium';
+import type { CanonicalMaterial, CanonicalMesh, CanonicalScene } from './core';
+
+export interface TriWorldRenderer {
+  viewer: Viewer;
+  setTerrainVisible(visible: boolean): void;
+  setRoadVisible(visible: boolean): void;
+  setWireframeVisible(visible: boolean): void;
+  setVerticesVisible(visible: boolean): void;
+  resetCamera(): void;
+  destroy(): void;
+}
+
+export function createTriWorldRenderer(containerId: string, scene: CanonicalScene): TriWorldRenderer {
+  const viewer = new Viewer(containerId, {
+    animation: false,
+    baseLayer: false,
+    baseLayerPicker: false,
+    fullscreenButton: false,
+    geocoder: false,
+    homeButton: false,
+    infoBox: false,
+    navigationHelpButton: false,
+    sceneModePicker: false,
+    selectionIndicator: false,
+    shouldAnimate: false,
+    timeline: false,
+    terrainProvider: new EllipsoidTerrainProvider(),
+    requestRenderMode: true,
+  });
+
+  viewer.scene.globe.show = false;
+  viewer.scene.skyBox.show = false;
+  viewer.scene.sun.show = false;
+  viewer.scene.moon.show = false;
+  viewer.scene.skyAtmosphere.show = false;
+  viewer.scene.fog.enabled = false;
+  viewer.scene.backgroundColor = Color.fromCssColorString('#07111f');
+  viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+
+  const anchor = Cartesian3.fromDegrees(scene.anchor.longitude, scene.anchor.latitude, scene.anchor.height);
+  const modelMatrix = Transforms.eastNorthUpToFixedFrame(anchor);
+  const materials = new Map(scene.materials.map((material) => [material.id, material]));
+  const surfacePrimitives = new Map<string, Primitive>();
+  const wirePrimitives = new Map<string, Primitive>();
+
+  for (const mesh of scene.meshes) {
+    const material = materials.get(mesh.materialId);
+    if (!material) throw new Error(`Missing material ${mesh.materialId}`);
+
+    const surface = createSurfacePrimitive(mesh, material, modelMatrix);
+    const wire = createWirePrimitive(mesh, modelMatrix);
+    surfacePrimitives.set(mesh.id, surface);
+    wirePrimitives.set(mesh.id, wire);
+    viewer.scene.primitives.add(surface);
+    viewer.scene.primitives.add(wire);
+  }
+
+  const points = createVertexPoints(scene.meshes, modelMatrix);
+  points.show = false;
+  viewer.scene.primitives.add(points);
+
+  const terrain = scene.meshes.find((mesh) => mesh.role === 'terrain');
+  const road = scene.meshes.find((mesh) => mesh.role === 'road');
+
+  function requestRender(): void {
+    viewer.scene.requestRender();
+  }
+
+  function resetCamera(): void {
+    viewer.camera.lookAtTransform(modelMatrix, new Cartesian3(175, -205, 145));
+    requestRender();
+  }
+
+  resetCamera();
+
+  return {
+    viewer,
+    setTerrainVisible(visible: boolean): void {
+      if (terrain) {
+        const primitive = surfacePrimitives.get(terrain.id);
+        const wire = wirePrimitives.get(terrain.id);
+        if (primitive) primitive.show = visible;
+        if (wire) wire.show = visible && wire.show;
+      }
+      requestRender();
+    },
+    setRoadVisible(visible: boolean): void {
+      if (road) {
+        const primitive = surfacePrimitives.get(road.id);
+        const wire = wirePrimitives.get(road.id);
+        if (primitive) primitive.show = visible;
+        if (wire) wire.show = visible && wire.show;
+      }
+      requestRender();
+    },
+    setWireframeVisible(visible: boolean): void {
+      for (const primitive of wirePrimitives.values()) primitive.show = visible;
+      requestRender();
+    },
+    setVerticesVisible(visible: boolean): void {
+      points.show = visible;
+      requestRender();
+    },
+    resetCamera,
+    destroy(): void {
+      if (!viewer.isDestroyed()) viewer.destroy();
+    },
+  };
+}
+
+function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial, modelMatrix: Matrix4): Primitive {
+  const geometry = createGeometry(mesh.positions, mesh.indices, PrimitiveType.TRIANGLES);
+  const color = new Color(...material.color);
+
+  return new Primitive({
+    geometryInstances: new GeometryInstance({
+      id: mesh.id,
+      geometry,
+      attributes: {
+        color: ColorGeometryInstanceAttribute.fromColor(color),
+      },
+    }),
+    appearance: new PerInstanceColorAppearance({
+      closed: false,
+      faceForward: true,
+      flat: true,
+      translucent: false,
+    }),
+    asynchronous: false,
+    modelMatrix,
+    releaseGeometryInstances: false,
+  });
+}
+
+function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primitive {
+  const raisedPositions = mesh.positions.slice();
+  for (let i = 2; i < raisedPositions.length; i += 3) raisedPositions[i] += 0.045;
+  const geometry = createGeometry(raisedPositions, buildEdgeIndices(mesh.indices), PrimitiveType.LINES);
+
+  return new Primitive({
+    geometryInstances: new GeometryInstance({
+      id: `${mesh.id}-wire`,
+      geometry,
+      attributes: {
+        color: ColorGeometryInstanceAttribute.fromColor(Color.WHITE.withAlpha(mesh.role === 'road' ? 0.72 : 0.22)),
+      },
+    }),
+    appearance: new PerInstanceColorAppearance({
+      closed: false,
+      faceForward: true,
+      flat: true,
+      translucent: true,
+    }),
+    asynchronous: false,
+    modelMatrix,
+    releaseGeometryInstances: false,
+  });
+}
+
+function createGeometry(positions: number[], indices: number[], primitiveType: PrimitiveType): Geometry {
+  const values = new Float64Array(positions);
+  const vertexCount = positions.length / 3;
+
+  return new Geometry({
+    attributes: {
+      position: new GeometryAttribute({
+        componentDatatype: ComponentDatatype.DOUBLE,
+        componentsPerAttribute: 3,
+        values,
+      }),
+    },
+    indices: IndexDatatype.createTypedArray(vertexCount, indices),
+    primitiveType,
+    boundingSphere: BoundingSphere.fromVertices(values),
+  });
+}
+
+function buildEdgeIndices(triangleIndices: number[]): number[] {
+  const edges = new Set<string>();
+  const indices: number[] = [];
+
+  for (let i = 0; i < triangleIndices.length; i += 3) {
+    addEdge(triangleIndices[i], triangleIndices[i + 1]);
+    addEdge(triangleIndices[i + 1], triangleIndices[i + 2]);
+    addEdge(triangleIndices[i + 2], triangleIndices[i]);
+  }
+
+  return indices;
+
+  function addEdge(a: number, b: number): void {
+    const low = Math.min(a, b);
+    const high = Math.max(a, b);
+    const key = `${low}:${high}`;
+    if (edges.has(key)) return;
+    edges.add(key);
+    indices.push(low, high);
+  }
+}
+
+function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): PointPrimitiveCollection {
+  const collection = new PointPrimitiveCollection();
+  const local = new Cartesian3();
+  const world = new Cartesian3();
+
+  for (const mesh of meshes) {
+    const color = mesh.role === 'road' ? Color.WHITE : Color.fromCssColorString('#9fffc7');
+    const stride = mesh.role === 'terrain' ? 2 : 1;
+
+    for (let vertex = 0; vertex < mesh.positions.length / 3; vertex += stride) {
+      const offset = vertex * 3;
+      Cartesian3.fromElements(
+        mesh.positions[offset],
+        mesh.positions[offset + 1],
+        mesh.positions[offset + 2] + 0.08,
+        local,
+      );
+      Matrix4.multiplyByPoint(modelMatrix, local, world);
+      collection.add({
+        position: Cartesian3.clone(world),
+        color,
+        pixelSize: mesh.role === 'road' ? 4 : 2.5,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      });
+    }
+  }
+
+  return collection;
+}
