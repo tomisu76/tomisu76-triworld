@@ -1,18 +1,16 @@
 import type { CanonicalMesh, CanonicalScene, Vec3 } from './core';
 
-const ANCHOR = {
+export interface OsmSceneOptions {
+  latitude: number;
+  longitude: number;
+  sizeMetres: number;
+}
+
+export const DEFAULT_OSM_SCENE_OPTIONS: OsmSceneOptions = {
   longitude: 18.34344407408825,
   latitude: 48.73275071557837,
-  height: 0,
+  sizeMetres: 1000,
 };
-
-const HALF_EXTENT_METRES = 500;
-const BBOX = [
-  18.33663427170421,
-  48.72825915970341,
-  18.35025387647229,
-  48.737242271453326,
-] as const;
 
 const EXCLUDED_HIGHWAYS = new Set([
   'bridleway',
@@ -67,6 +65,12 @@ type LocalPoint = {
   y: number;
 };
 
+type GeographicAnchor = {
+  longitude: number;
+  latitude: number;
+  height: number;
+};
+
 export interface OsmSceneStats {
   source: string;
   fetchedAt: string;
@@ -83,8 +87,16 @@ export interface OsmSceneResult {
   stats: OsmSceneStats;
 }
 
-export async function buildOsmScene(): Promise<OsmSceneResult> {
-  const bboxText = BBOX.join(',');
+export async function buildOsmScene(input: Partial<OsmSceneOptions> = {}): Promise<OsmSceneResult> {
+  const options = normalizeOptions(input);
+  const anchor: GeographicAnchor = {
+    longitude: options.longitude,
+    latitude: options.latitude,
+    height: 0,
+  };
+  const halfExtentMetres = options.sizeMetres / 2;
+  const bbox = buildBbox(anchor, halfExtentMetres);
+  const bboxText = bbox.join(',');
   const response = await fetch(`/api/osm?bbox=${encodeURIComponent(bboxText)}`);
   if (!response.ok) {
     const text = await response.text();
@@ -97,7 +109,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
   for (const element of payload.data.elements) {
     if (element.type !== 'node') continue;
     const node = element as OsmNode;
-    nodes.set(node.id, geographicToLocal(node.lon, node.lat));
+    nodes.set(node.id, geographicToLocal(node.lon, node.lat, anchor));
   }
 
   const positions: number[] = [];
@@ -125,7 +137,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
     const cleanPoints = deduplicatePoints(closed ? sourcePoints.slice(0, -1) : sourcePoints);
     if (cleanPoints.length < 2) continue;
 
-    const polylines = clipPolyline(cleanPoints, closed, HALF_EXTENT_METRES + 20);
+    const polylines = clipPolyline(cleanPoints, closed, halfExtentMetres + 20);
     if (polylines.length === 0) continue;
 
     const width = roadWidth(tags);
@@ -148,7 +160,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
 
   if (roadSegments === 0) throw new Error('No driveable OSM highway geometry was found in the selected area.');
 
-  const terrain = buildTerrainMesh();
+  const terrain = buildTerrainMesh(halfExtentMetres, options.sizeMetres);
   const road: CanonicalMesh = {
     id: 'roads-osm-live',
     role: 'road',
@@ -158,7 +170,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
   };
 
   const scene: CanonicalScene = {
-    id: 'triworld-osm-skacany-v01',
+    id: buildSceneId(options),
     schemaVersion: '0.1.0',
     coordinateSystem: {
       handedness: 'right',
@@ -166,7 +178,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
       units: 'metres',
       localFrame: 'ENU',
     },
-    anchor: ANCHOR,
+    anchor,
     materials: [
       { id: 'terrain-preview', name: 'Procedural terrain preview', color: [0.16, 0.42, 0.24, 1] },
       { id: 'road-osm', name: 'OpenStreetMap roads', color: [1, 0.08, 0.58, 1] },
@@ -180,7 +192,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
     stats: {
       source: payload.source,
       fetchedAt: payload.fetchedAt,
-      bbox: BBOX,
+      bbox,
       waysImported,
       roadSegments,
       namedRoads: [...namedRoads].sort((a, b) => a.localeCompare(b)),
@@ -190,32 +202,72 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
   };
 }
 
-function buildTerrainMesh(): CanonicalMesh {
-  const size = 81;
-  const step = (HALF_EXTENT_METRES * 2) / (size - 1);
+function normalizeOptions(input: Partial<OsmSceneOptions>): OsmSceneOptions {
+  const options = { ...DEFAULT_OSM_SCENE_OPTIONS, ...input };
+  if (!Number.isFinite(options.latitude) || options.latitude < -85 || options.latitude > 85) {
+    throw new Error('Latitude must be between -85 and 85 degrees.');
+  }
+  if (!Number.isFinite(options.longitude) || options.longitude < -180 || options.longitude > 180) {
+    throw new Error('Longitude must be between -180 and 180 degrees.');
+  }
+  if (!Number.isFinite(options.sizeMetres) || options.sizeMetres < 250 || options.sizeMetres > 2000) {
+    throw new Error('Area size must be between 250 and 2000 metres.');
+  }
+  return options;
+}
+
+function buildBbox(
+  anchor: GeographicAnchor,
+  halfExtentMetres: number,
+): readonly [number, number, number, number] {
+  const metresPerDegreeLatitude = 111_320;
+  const longitudeScale = metresPerDegreeLatitude * Math.max(0.05, Math.cos((anchor.latitude * Math.PI) / 180));
+  const latitudeDelta = halfExtentMetres / metresPerDegreeLatitude;
+  const longitudeDelta = halfExtentMetres / longitudeScale;
+  return [
+    anchor.longitude - longitudeDelta,
+    anchor.latitude - latitudeDelta,
+    anchor.longitude + longitudeDelta,
+    anchor.latitude + latitudeDelta,
+  ];
+}
+
+function buildSceneId(options: OsmSceneOptions): string {
+  const latitude = coordinateToken(options.latitude);
+  const longitude = coordinateToken(options.longitude);
+  return `triworld-osm-${latitude}-${longitude}-${Math.round(options.sizeMetres)}m`;
+}
+
+function coordinateToken(value: number): string {
+  return value.toFixed(5).replace('-', 'm').replace('.', 'p');
+}
+
+function buildTerrainMesh(halfExtentMetres: number, sizeMetres: number): CanonicalMesh {
+  const gridSize = 81;
+  const step = (halfExtentMetres * 2) / (gridSize - 1);
   const positions: number[] = [];
   const indices: number[] = [];
 
-  for (let row = 0; row < size; row++) {
-    for (let column = 0; column < size; column++) {
-      const x = -HALF_EXTENT_METRES + column * step;
-      const y = -HALF_EXTENT_METRES + row * step;
+  for (let row = 0; row < gridSize; row++) {
+    for (let column = 0; column < gridSize; column++) {
+      const x = -halfExtentMetres + column * step;
+      const y = -halfExtentMetres + row * step;
       positions.push(x, y, terrainHeight(x, y));
     }
   }
 
-  for (let row = 0; row < size - 1; row++) {
-    for (let column = 0; column < size - 1; column++) {
-      const a = row * size + column;
+  for (let row = 0; row < gridSize - 1; row++) {
+    for (let column = 0; column < gridSize - 1; column++) {
+      const a = row * gridSize + column;
       const b = a + 1;
-      const c = a + size;
+      const c = a + gridSize;
       const d = c + 1;
       indices.push(a, b, d, a, d, c);
     }
   }
 
   return {
-    id: 'terrain-procedural-1km',
+    id: `terrain-procedural-${Math.round(sizeMetres)}m`,
     role: 'terrain',
     materialId: 'terrain-preview',
     positions,
@@ -337,12 +389,12 @@ function clipSegment(a: LocalPoint, b: LocalPoint, extent: number): [LocalPoint,
   ];
 }
 
-function geographicToLocal(longitude: number, latitude: number): LocalPoint {
+function geographicToLocal(longitude: number, latitude: number, anchor: GeographicAnchor): LocalPoint {
   const metresPerDegreeLatitude = 111_320;
-  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.cos((ANCHOR.latitude * Math.PI) / 180);
+  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.cos((anchor.latitude * Math.PI) / 180);
   return {
-    x: (longitude - ANCHOR.longitude) * metresPerDegreeLongitude,
-    y: (latitude - ANCHOR.latitude) * metresPerDegreeLatitude,
+    x: (longitude - anchor.longitude) * metresPerDegreeLongitude,
+    y: (latitude - anchor.latitude) * metresPerDegreeLatitude,
   };
 }
 
