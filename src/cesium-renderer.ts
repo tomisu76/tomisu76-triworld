@@ -60,7 +60,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       maximumLevel: 19,
     }),
   );
-  osmLayer.alpha = 0.78;
+  osmLayer.alpha = 0.72;
   viewer.imageryLayers.add(osmLayer);
 
   viewer.scene.globe.show = true;
@@ -74,8 +74,11 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   viewer.scene.backgroundColor = Color.fromCssColorString('#07111f');
   viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
 
+  const metrics = computeSceneMetrics(scene.meshes);
   const anchor = Cartesian3.fromDegrees(scene.anchor.longitude, scene.anchor.latitude, scene.anchor.height);
-  const modelMatrix = Transforms.eastNorthUpToFixedFrame(anchor);
+  const enuMatrix = Transforms.eastNorthUpToFixedFrame(anchor);
+  const localLift = Matrix4.fromTranslation(new Cartesian3(0, 0, metrics.verticalOffset));
+  const modelMatrix = Matrix4.multiply(enuMatrix, localLift, new Matrix4());
   const materials = new Map(scene.materials.map((material) => [material.id, material]));
   const surfacePrimitives = new Map<string, Primitive>();
   const wirePrimitives = new Map<string, Primitive>();
@@ -105,7 +108,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     position: Cartesian3.fromDegrees(
       scene.anchor.longitude,
       scene.anchor.latitude,
-      scene.anchor.height + 12,
+      scene.anchor.height + metrics.verticalOffset + 12,
     ),
     point: {
       pixelSize: 13,
@@ -145,7 +148,10 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   }
 
   function resetCamera(): void {
-    viewer.camera.lookAtTransform(modelMatrix, new Cartesian3(175, -205, 145));
+    viewer.camera.lookAtTransform(
+      modelMatrix,
+      new Cartesian3(metrics.radius * 1.15, -metrics.radius * 1.35, metrics.radius * 0.92),
+    );
     viewer.scene.requestRender();
   }
 
@@ -155,7 +161,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       destination: Cartesian3.fromDegrees(
         scene.anchor.longitude,
         scene.anchor.latitude,
-        1450,
+        Math.max(1450, metrics.radius * 3.1),
       ),
       orientation: {
         heading: 0,
@@ -229,7 +235,7 @@ function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial
 
 function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primitive {
   const raisedPositions = mesh.positions.slice();
-  for (let i = 2; i < raisedPositions.length; i += 3) raisedPositions[i] += 0.045;
+  for (let index = 2; index < raisedPositions.length; index += 3) raisedPositions[index] += 0.045;
   const geometry = createGeometry(raisedPositions, buildEdgeIndices(mesh.indices), PrimitiveType.LINES);
 
   return new Primitive({
@@ -237,7 +243,7 @@ function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primiti
       id: `${mesh.id}-wire`,
       geometry,
       attributes: {
-        color: ColorGeometryInstanceAttribute.fromColor(Color.WHITE.withAlpha(mesh.role === 'road' ? 0.72 : 0.22)),
+        color: ColorGeometryInstanceAttribute.fromColor(Color.WHITE.withAlpha(mesh.role === 'road' ? 0.72 : 0.18)),
       },
     }),
     appearance: new PerInstanceColorAppearance({
@@ -274,10 +280,10 @@ function buildEdgeIndices(triangleIndices: number[]): number[] {
   const edges = new Set<string>();
   const indices: number[] = [];
 
-  for (let i = 0; i < triangleIndices.length; i += 3) {
-    addEdge(triangleIndices[i], triangleIndices[i + 1]);
-    addEdge(triangleIndices[i + 1], triangleIndices[i + 2]);
-    addEdge(triangleIndices[i + 2], triangleIndices[i]);
+  for (let index = 0; index < triangleIndices.length; index += 3) {
+    addEdge(triangleIndices[index], triangleIndices[index + 1]);
+    addEdge(triangleIndices[index + 1], triangleIndices[index + 2]);
+    addEdge(triangleIndices[index + 2], triangleIndices[index]);
   }
 
   return indices;
@@ -299,7 +305,7 @@ function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): Poin
 
   for (const mesh of meshes) {
     const color = mesh.role === 'road' ? Color.WHITE : Color.fromCssColorString('#9fffc7');
-    const stride = mesh.role === 'terrain' ? 2 : 1;
+    const stride = mesh.role === 'terrain' ? 4 : 1;
 
     for (let vertex = 0; vertex < mesh.positions.length / 3; vertex += stride) {
       const offset = vertex * 3;
@@ -320,4 +326,31 @@ function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): Poin
   }
 
   return collection;
+}
+
+function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; verticalOffset: number } {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+
+  for (const mesh of meshes) {
+    for (let index = 0; index < mesh.positions.length; index += 3) {
+      minX = Math.min(minX, mesh.positions[index]);
+      minY = Math.min(minY, mesh.positions[index + 1]);
+      minZ = Math.min(minZ, mesh.positions[index + 2]);
+      maxX = Math.max(maxX, mesh.positions[index]);
+      maxY = Math.max(maxY, mesh.positions[index + 1]);
+      maxZ = Math.max(maxZ, mesh.positions[index + 2]);
+    }
+  }
+
+  const width = maxX - minX;
+  const depth = maxY - minY;
+  const height = maxZ - minZ;
+  const radius = Math.max(90, Math.hypot(width, depth, height) * 0.56);
+  const verticalOffset = Math.max(2, 3 - minZ);
+  return { radius, verticalOffset };
 }
