@@ -7,8 +7,8 @@ import {
   EllipsoidTerrainProvider,
   Geometry,
   GeometryAttribute,
+  GeometryAttributes,
   GeometryInstance,
-  IndexDatatype,
   Matrix4,
   PerInstanceColorAppearance,
   PointPrimitiveCollection,
@@ -48,10 +48,10 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   });
 
   viewer.scene.globe.show = false;
-  viewer.scene.skyBox.show = false;
-  viewer.scene.sun.show = false;
-  viewer.scene.moon.show = false;
-  viewer.scene.skyAtmosphere.show = false;
+  if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+  if (viewer.scene.sun) viewer.scene.sun.show = false;
+  if (viewer.scene.moon) viewer.scene.moon.show = false;
+  if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
   viewer.scene.fog.enabled = false;
   viewer.scene.backgroundColor = Color.fromCssColorString('#07111f');
   viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
@@ -181,16 +181,16 @@ function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primiti
 function createGeometry(positions: number[], indices: number[], primitiveType: number): Geometry {
   const values = new Float64Array(positions);
   const vertexCount = positions.length / 3;
+  const attributes = new GeometryAttributes();
+  attributes.position = new GeometryAttribute({
+    componentDatatype: ComponentDatatype.DOUBLE,
+    componentsPerAttribute: 3,
+    values,
+  });
 
   return new Geometry({
-    attributes: {
-      position: new GeometryAttribute({
-        componentDatatype: ComponentDatatype.DOUBLE,
-        componentsPerAttribute: 3,
-        values,
-      }),
-    },
-    indices: IndexDatatype.createTypedArray(vertexCount, indices),
+    attributes,
+    indices: vertexCount < 65_536 ? new Uint16Array(indices) : new Uint32Array(indices),
     primitiveType,
     boundingSphere: BoundingSphere.fromVertices(positions),
   });
