@@ -1,7 +1,10 @@
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './styles.css';
 import { buildSceneManifest, buildSyntheticScene, serializeScene, type CanonicalScene } from './core';
-import { createTriWorldRenderer } from './cesium-renderer';
+import {
+  createTriWorldRenderer,
+  type MapSquareSelection,
+} from './cesium-renderer';
 import {
   buildOsmScene,
   DEFAULT_OSM_SCENE_OPTIONS,
@@ -20,9 +23,9 @@ const app = requireElement<HTMLDivElement>('#app');
 app.innerHTML = `
   <main class="loading-screen">
     <div class="loading-card">
-      <p class="eyebrow">TriWorld v0.5</p>
-      <h1>Compiling the selected road network…</h1>
-      <p>Downloading OpenStreetMap elements around ${selectedArea.latitude.toFixed(7)}, ${selectedArea.longitude.toFixed(7)} and converting highway centre-lines into canonical indexed triangles.</p>
+      <p class="eyebrow">TriWorld v0.6</p>
+      <h1>Building the selected square…</h1>
+      <p>Downloading OpenStreetMap elements around ${selectedArea.latitude.toFixed(7)}, ${selectedArea.longitude.toFixed(7)} and converting road centre-lines into canonical indexed triangles.</p>
       <div class="loading-bar"><span></span></div>
     </div>
   </main>`;
@@ -54,16 +57,15 @@ const terrain = manifest.meshes.find((mesh) => mesh.role === 'terrain');
 const road = manifest.meshes.find((mesh) => mesh.role === 'road');
 const coordinateLabel = `${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`;
 const sourceIsLive = osmStats !== null;
+let pendingSelection: MapSquareSelection = { ...selectedArea };
 
 app.innerHTML = `
   <main class="shell">
     <header>
       <div>
-        <p class="eyebrow">TriWorld v0.5 · selectable OSM road compiler</p>
-        <h1>${sourceIsLive ? 'Choose a place. Compile its roads.' : 'OSM fallback active.'}</h1>
-        <p class="lede">${sourceIsLive
-          ? `Driveable OpenStreetMap ways inside a ${formatAreaSize(selectedArea.sizeMetres)} site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
-          : `The live OSM request failed, so the synthetic diagnostic scene is shown at the selected anchor. <strong>${escapeHtml(sourceError ?? '')}</strong>`}</p>
+        <p class="eyebrow">TriWorld v0.6 · map square selector</p>
+        <h1>Draw a square. Fetch it. Build the map.</h1>
+        <p class="lede">Move around the OpenStreetMap view, draw the exact square you want processed, then press <strong>Fetch & build map</strong>. No coordinate entry is required.</p>
       </div>
       <div class="stats">
         <span>${manifest.vertices.toLocaleString()} vertices</span>
@@ -76,8 +78,23 @@ app.innerHTML = `
     <section class="panel">
       <div class="viewport-card">
         <div id="cesiumContainer"></div>
+
+        <div class="area-builder" id="areaBuilder">
+          <div class="area-builder-heading">
+            <span>New processing area</span>
+            <strong id="selectionSize">${formatAreaSize(pendingSelection.sizeMetres)}</strong>
+          </div>
+          <p id="selectionCoordinates">${formatCoordinates(pendingSelection)}</p>
+          <div class="area-builder-actions">
+            <button id="drawSquare" type="button">1. Draw square</button>
+            <button id="fetchSquare" type="button" class="primary">2. Fetch & build map</button>
+          </div>
+          <button id="cancelSquare" type="button" class="text-button" hidden>Cancel drawing</button>
+          <small id="selectionStatus">Pan and zoom first. Then press Draw square and drag diagonally across the map.</small>
+        </div>
+
         <div class="location-badge">
-          <span>Geographic anchor</span>
+          <span>Currently compiled scene</span>
           <strong>${coordinateLabel}</strong>
         </div>
         <div class="viewport-badge">Canonical mesh hash <strong>${manifest.hash}</strong></div>
@@ -85,40 +102,24 @@ app.innerHTML = `
 
       <aside>
         <div>
-          <p class="section-label">Select processing area</p>
-          <form id="locationForm" class="location-form" novalidate>
-            <div class="coordinate-grid">
-              <label>
-                <span>Latitude</span>
-                <input id="latitude" name="latitude" type="number" inputmode="decimal" step="any" min="-85" max="85" value="${selectedArea.latitude}" required />
-              </label>
-              <label>
-                <span>Longitude</span>
-                <input id="longitude" name="longitude" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${selectedArea.longitude}" required />
-              </label>
-              <label class="area-size-field">
-                <span>Area size</span>
-                <select id="areaSize" name="areaSize">
-                  ${renderSizeOptions(selectedArea.sizeMetres)}
-                </select>
-              </label>
-            </div>
-            <button type="submit" class="primary">Generate selected area</button>
-            <p id="locationStatus" class="location-status">Paste coordinates from Google Maps or any GIS application.</p>
-          </form>
+          <p class="section-label">Selected processing square</p>
+          <div class="selected-area-card">
+            <strong id="selectedAreaSize">${formatAreaSize(pendingSelection.sizeMetres)}</strong>
+            <span id="selectedAreaCoordinates">${formatCoordinates(pendingSelection)}</span>
+          </div>
         </div>
 
         <div class="scene-heading">
-          <p class="section-label">CanonicalScene</p>
+          <p class="section-label">Current CanonicalScene</p>
           <h2>${scene.id}</h2>
         </div>
 
         <dl>
-          <div><dt>Location</dt><dd>${coordinateLabel}</dd></div>
+          <div><dt>Compiled location</dt><dd>${coordinateLabel}</dd></div>
           <div><dt>Road source</dt><dd>${sourceIsLive ? 'OSM API v0.6' : 'Synthetic fallback'}</dd></div>
           <div><dt>Terrain source</dt><dd>${sourceIsLive ? 'Procedural preview' : 'Synthetic preview'}</dd></div>
           <div><dt>Frame</dt><dd>ENU / Z-up</dd></div>
-          <div><dt>Area</dt><dd>${sourceIsLive ? formatAreaSize(selectedArea.sizeMetres) : formatBounds()}</dd></div>
+          <div><dt>Compiled area</dt><dd>${sourceIsLive ? formatAreaSize(selectedArea.sizeMetres) : formatBounds()}</dd></div>
           <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
           <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
           ${osmStats ? `<div><dt>OSM ways</dt><dd>${osmStats.waysImported}</dd></div>` : ''}
@@ -147,7 +148,7 @@ app.innerHTML = `
         <div class="buttons">
           <button id="localView" type="button">Local triangle view</button>
           <button id="mapView" type="button">Map overview</button>
-          <button id="download" type="button" class="primary">Download scene JSON</button>
+          <button id="download" type="button">Download scene JSON</button>
         </div>
 
         <div class="validation ${manifest.validation.valid ? 'valid' : 'invalid'}">
@@ -163,11 +164,14 @@ app.innerHTML = `
   </main>`;
 
 const renderer = createTriWorldRenderer('cesiumContainer', scene);
-const locationForm = requireElement<HTMLFormElement>('#locationForm');
-const latitudeInput = requireElement<HTMLInputElement>('#latitude');
-const longitudeInput = requireElement<HTMLInputElement>('#longitude');
-const areaSizeInput = requireElement<HTMLSelectElement>('#areaSize');
-const locationStatus = requireElement<HTMLParagraphElement>('#locationStatus');
+const drawSquareButton = requireElement<HTMLButtonElement>('#drawSquare');
+const fetchSquareButton = requireElement<HTMLButtonElement>('#fetchSquare');
+const cancelSquareButton = requireElement<HTMLButtonElement>('#cancelSquare');
+const selectionSize = requireElement<HTMLElement>('#selectionSize');
+const selectionCoordinates = requireElement<HTMLElement>('#selectionCoordinates');
+const selectionStatus = requireElement<HTMLElement>('#selectionStatus');
+const selectedAreaSize = requireElement<HTMLElement>('#selectedAreaSize');
+const selectedAreaCoordinates = requireElement<HTMLElement>('#selectedAreaCoordinates');
 const mapToggle = requireElement<HTMLInputElement>('#map');
 const mapOpacity = requireElement<HTMLInputElement>('#mapOpacity');
 const terrainToggle = requireElement<HTMLInputElement>('#terrain');
@@ -178,29 +182,49 @@ const localViewButton = requireElement<HTMLButtonElement>('#localView');
 const mapViewButton = requireElement<HTMLButtonElement>('#mapView');
 const downloadButton = requireElement<HTMLButtonElement>('#download');
 
-locationForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const latitude = Number(latitudeInput.value);
-  const longitude = Number(longitudeInput.value);
-  const sizeMetres = Number(areaSizeInput.value);
-  const validationError = validateSceneOptions({ latitude, longitude, sizeMetres });
+renderer.setAreaSelection(pendingSelection);
+renderer.setMapOpacity(Number(mapOpacity.value) / 100);
+renderer.showMapOverview();
 
-  if (validationError) {
-    locationStatus.textContent = validationError;
-    locationStatus.classList.add('error');
-    return;
-  }
+drawSquareButton.addEventListener('click', () => {
+  drawSquareButton.disabled = true;
+  fetchSquareButton.disabled = true;
+  cancelSquareButton.hidden = false;
+  selectionStatus.textContent = 'Drawing mode: drag diagonally from one corner to the opposite corner. A simple click moves the current square.';
+  selectionStatus.classList.add('active');
 
-  locationStatus.textContent = 'Loading selected OpenStreetMap area…';
-  locationStatus.classList.remove('error');
-  const params = new URLSearchParams(window.location.search);
-  params.set('lat', latitude.toFixed(7));
-  params.set('lon', longitude.toFixed(7));
-  params.set('size', String(Math.round(sizeMetres)));
+  renderer.beginAreaSelection(
+    (selection) => {
+      pendingSelection = selection;
+      updateSelectionReadout();
+    },
+    (selection) => {
+      pendingSelection = selection;
+      updateSelectionReadout();
+      endDrawingMode('Square ready. Press Fetch & build map.');
+    },
+  );
+});
+
+cancelSquareButton.addEventListener('click', () => {
+  renderer.cancelAreaSelection();
+  renderer.setAreaSelection(pendingSelection);
+  endDrawingMode('Drawing cancelled. The last selected square is still ready.');
+});
+
+fetchSquareButton.addEventListener('click', () => {
+  selectionStatus.textContent = 'Fetching OpenStreetMap and building canonical triangles…';
+  selectionStatus.classList.add('active');
+  fetchSquareButton.disabled = true;
+  drawSquareButton.disabled = true;
+
+  const params = new URLSearchParams();
+  params.set('lat', pendingSelection.latitude.toFixed(7));
+  params.set('lon', pendingSelection.longitude.toFixed(7));
+  params.set('size', String(Math.round(pendingSelection.sizeMetres)));
   window.location.search = params.toString();
 });
 
-renderer.setMapOpacity(Number(mapOpacity.value) / 100);
 mapToggle.addEventListener('change', () => renderer.setMapVisible(mapToggle.checked));
 mapOpacity.addEventListener('input', () => renderer.setMapOpacity(Number(mapOpacity.value) / 100));
 terrainToggle.addEventListener('change', () => renderer.setTerrainVisible(terrainToggle.checked));
@@ -211,6 +235,24 @@ localViewButton.addEventListener('click', () => renderer.resetCamera());
 mapViewButton.addEventListener('click', () => renderer.showMapOverview());
 downloadButton.addEventListener('click', downloadScene);
 window.addEventListener('beforeunload', () => renderer.destroy(), { once: true });
+
+function endDrawingMode(message: string): void {
+  drawSquareButton.disabled = false;
+  drawSquareButton.textContent = '1. Draw another square';
+  fetchSquareButton.disabled = false;
+  cancelSquareButton.hidden = true;
+  selectionStatus.textContent = message;
+  selectionStatus.classList.remove('active');
+}
+
+function updateSelectionReadout(): void {
+  const sizeText = formatAreaSize(pendingSelection.sizeMetres);
+  const coordinateText = formatCoordinates(pendingSelection);
+  selectionSize.textContent = sizeText;
+  selectionCoordinates.textContent = coordinateText;
+  selectedAreaSize.textContent = sizeText;
+  selectedAreaCoordinates.textContent = coordinateText;
+}
 
 function readSceneOptions(): OsmSceneOptions {
   const params = new URLSearchParams(window.location.search);
@@ -238,16 +280,14 @@ function validateSceneOptions(options: OsmSceneOptions): string | null {
   return null;
 }
 
-function renderSizeOptions(selectedSize: number): string {
-  return [500, 1000, 1500, 2000]
-    .map((size) => `<option value="${size}"${size === selectedSize ? ' selected' : ''}>${formatAreaSize(size)}</option>`)
-    .join('');
-}
-
 function formatAreaSize(sizeMetres: number): string {
   const kilometres = sizeMetres / 1000;
-  const label = Number.isInteger(kilometres) ? kilometres.toFixed(0) : kilometres.toFixed(1);
-  return `${label} × ${label} km`;
+  const label = kilometres >= 1 ? kilometres.toFixed(kilometres % 1 === 0 ? 0 : 2) : `${Math.round(sizeMetres)} m`;
+  return kilometres >= 1 ? `${label} × ${label} km` : `${label} × ${label}`;
+}
+
+function formatCoordinates(selection: Pick<MapSquareSelection, 'latitude' | 'longitude'>): string {
+  return `${selection.latitude.toFixed(7)}, ${selection.longitude.toFixed(7)}`;
 }
 
 function downloadScene(): void {
@@ -279,7 +319,7 @@ function formatBounds(): string {
   const width = max[0] - min[0];
   const depth = max[1] - min[1];
   const height = max[2] - min[2];
-  return `${width.toFixed(0)} × ${depth.toFixed(0)} × ${height.toFixed(1)}`;
+  return `${width.toFixed(0)} × ${depth.toFixed(0)} × ${height.toFixed(1)} m`;
 }
 
 function escapeHtml(value: string): string {
