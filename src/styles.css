@@ -9,6 +9,7 @@
 html, body, #app { width: 100%; height: 100%; margin: 0; }
 body { overflow: hidden; background: radial-gradient(circle at 20% 0%, #163153 0, #07111f 48%); }
 button, input { font: inherit; }
+strong { color: #f7fbff; }
 
 .shell {
   height: 100%;
@@ -36,7 +37,7 @@ header {
 
 h1 { margin: 0; font-size: clamp(28px, 3.8vw, 54px); line-height: .98; letter-spacing: -.04em; }
 h2 { margin: 0; font-size: 19px; line-height: 1.15; }
-.lede { max-width: 850px; margin: 12px 0 0; color: #aebbd1; line-height: 1.55; }
+.lede { max-width: 900px; margin: 12px 0 0; color: #aebbd1; line-height: 1.55; }
 
 .stats { display: flex; gap: 9px; flex-wrap: wrap; justify-content: end; }
 .stats span {
@@ -54,7 +55,7 @@ h2 { margin: 0; font-size: 19px; line-height: 1.15; }
 .panel {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 310px;
+  grid-template-columns: minmax(0, 1fr) 330px;
   gap: 16px;
 }
 
@@ -72,24 +73,42 @@ h2 { margin: 0; font-size: 19px; line-height: 1.15; }
 }
 
 #cesiumContainer { position: absolute; inset: 0; }
-#cesiumContainer .cesium-viewer-bottom { display: none; }
-#cesiumContainer .cesium-widget-credits { display: none !important; }
+#cesiumContainer .cesium-viewer-bottom {
+  left: auto;
+  right: 10px;
+  bottom: 7px;
+  max-width: 48%;
+}
+#cesiumContainer .cesium-widget-credits {
+  font-size: 10px;
+  opacity: .78;
+  text-shadow: 0 1px 3px rgba(0,0,0,.9);
+}
 
-.viewport-badge {
+.viewport-badge, .location-badge {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
   z-index: 2;
   padding: 8px 11px;
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,.13);
-  background: rgba(4,10,20,.76);
+  background: rgba(4,10,20,.78);
   color: #aebbd1;
   backdrop-filter: blur(12px);
   pointer-events: none;
   font-size: 12px;
 }
+
+.viewport-badge { left: 14px; bottom: 14px; }
 .viewport-badge strong { color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.location-badge {
+  left: 14px;
+  top: 14px;
+  display: grid;
+  gap: 3px;
+}
+.location-badge span { color: #7fa0c6; font-size: 10px; text-transform: uppercase; letter-spacing: .11em; }
+.location-badge strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 aside {
   border-radius: 18px;
@@ -100,11 +119,14 @@ aside {
 dl { margin: 18px 0; }
 dl div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
 dt { color: #8fa1bd; }
-dd { margin: 0; font-weight: 750; text-align: right; }
+dd { margin: 0; font-weight: 750; text-align: right; max-width: 62%; overflow-wrap: anywhere; }
 
-.controls { padding: 4px 0 12px; }
+.control-heading { margin-top: 17px; }
+.controls { padding: 2px 0 10px; }
 .controls label { display: flex; gap: 10px; align-items: center; margin: 11px 0; color: #dbe7fb; cursor: pointer; }
-.controls input { accent-color: #52d9ff; width: 16px; height: 16px; }
+.controls input[type="checkbox"] { accent-color: #52d9ff; width: 16px; height: 16px; }
+.range-label { display: grid !important; grid-template-columns: 1fr; gap: 7px !important; color: #9fb0c9 !important; font-size: 12px; }
+.range-label input { width: 100%; accent-color: #67d5ff; }
 
 .buttons { display: grid; gap: 9px; }
 button {
@@ -138,4 +160,5 @@ button.primary { color: #061019; border-color: transparent; background: linear-g
   header { align-items: start; flex-direction: column; }
   .stats { justify-content: start; }
   .panel { grid-template-columns: 1fr; grid-template-rows: 65vh auto; }
+  #cesiumContainer .cesium-viewer-bottom { max-width: 70%; }
 }
