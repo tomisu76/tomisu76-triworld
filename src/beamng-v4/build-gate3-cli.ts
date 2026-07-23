@@ -7,36 +7,31 @@ import * as path from 'node:path';
 import { buildBanovceRealWorldTerrain } from './gis-terrain';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
-import { buildMountainLoopRoadTerrain } from './road-terrain-gate3';
+import { buildBakedMountainLoopRoadTerrain } from './road-terrain-gate3-baked';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 async function main(): Promise<void> {
-  console.log('Building TriWorld V4 Gate 3 road-first mountain circuit...');
+  console.log('Building TriWorld V4 Gate 3 baked-road mountain circuit...');
 
   const base = buildBanovceRealWorldTerrain({
     size: 1024,
     squareSize: 1.0,
     maxHeight: 500.0,
   });
-  const roadTerrain = buildMountainLoopRoadTerrain(base);
+  const roadTerrain = buildBakedMountainLoopRoadTerrain(base);
 
   const diagnosticMarkers = generateDiagnosticMarkers(
     base.transformer,
     roadTerrain.sampleElevation,
   ).filter((marker) => marker.name !== 'spawns_default');
 
-  // Visual hotfix: the road surface is rendered exclusively by the native
-  // ASPHALT terrain layer. The previous DecalRoad overlay produced BeamNG's
-  // magenta missing-material fringe on some installations. Keeping the
-  // heightfield and material layer as the single visual source also avoids
-  // z-fighting and duplicated road edges.
   const levelFiles = generateLevelPackageFiles(roadTerrain.artifact, {
     title: 'TriWorld V4 Native Gate 3 — Jankov Vŕšok Mountain Circuit',
-    description: 'Closed two-lane road designed in 3D first, with deterministic cut/fill terrain adaptation and native asphalt terrain surface.',
+    description: 'Closed road-first mountain circuit with deterministic cut/fill and a single baked terrain material for BeamNG 0.36 compatibility.',
     extraMarkers: diagnosticMarkers,
-    extraObjects: [],
     defaultSpawnObject: roadTerrain.roadSpawn,
     supportsTraffic: false,
+    diffusePng: roadTerrain.bakedDiffusePng,
   });
 
   const distDir = path.resolve('dist');
@@ -54,15 +49,13 @@ async function main(): Promise<void> {
   const roadManifest = {
     ...manifest,
     gate: 3,
-    pipeline: 'road-first-cut-fill-v1.1',
+    pipeline: 'road-first-cut-fill-baked-single-material-v2',
     gisLocation: 'Jankov Vŕšok / Bánovce nad Bebravou, Slovakia',
     wgs84Center: base.transformer.origin.centerWgs84,
     road: roadTerrain.stats,
-    roadMaterial: 'ASPHALT',
-    visualRoadMode: 'native-terrain-layer-only',
-    decalRoadOverlay: false,
-    trafficSupport: false,
-    visualFix: 'Removed DecalRoad overlay to eliminate magenta missing-material fringe and z-fighting.',
+    visualRoadRepresentation: 'baked into triworld_v4_ground diffuse texture',
+    terrainMaterials: ['triworld_v4_ground'],
+    magentaBlendRiskRemoved: true,
     terrainCorridor: {
       roadWidthMetres: 7.2,
       shoulderWidthMetres: 1.4,
