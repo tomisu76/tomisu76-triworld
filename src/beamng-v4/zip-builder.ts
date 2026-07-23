@@ -34,6 +34,14 @@ export async function buildBeamNgZipPackage(
     entries.push({ zipPath: `levels/${levelName}/art/terrains/ground_n.png`, content: files.normalPng });
   }
 
+  if (files.roadDae && files.roadDae.length > 0) {
+    entries.push({ zipPath: `levels/${levelName}/art/road/road_surface.dae`, content: files.roadDae });
+  }
+
+  if (files.asphaltPng && files.asphaltPng.length > 0) {
+    entries.push({ zipPath: `levels/${levelName}/art/road/asphalt_d.png`, content: files.asphaltPng });
+  }
+
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
 
   const packagedFileHashes: Record<string, string> = {};
