@@ -7,12 +7,9 @@ import {
   ImageryLayer,
   Math as CesiumMath,
   OpenStreetMapImageryProvider,
-  Rectangle,
-  ScreenSpaceEventHandler,
-  ScreenSpaceEventType,
   Viewer,
 } from 'cesium';
-import { selectionToBbox, type AreaSelection } from './osm-scene';
+import type { AreaSelection } from './osm-scene';
 
 export interface AreaSelectionRenderer {
   viewer: Viewer;
@@ -56,78 +53,53 @@ export function createAreaSelectionRenderer(
 
   viewer.scene.globe.show = true;
   viewer.scene.globe.depthTestAgainstTerrain = false;
-  viewer.scene.globe.baseColor = Color.fromCssColorString('#dce7d3');
+  viewer.scene.globe.baseColor = Color.fromCssColorString('#07111f');
   if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
   if (viewer.scene.sun) viewer.scene.sun.show = false;
   if (viewer.scene.moon) viewer.scene.moon.show = false;
   if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
   viewer.scene.fog.enabled = false;
-  viewer.scene.backgroundColor = Color.fromCssColorString('#dce7d3');
+  viewer.scene.backgroundColor = Color.fromCssColorString('#07111f');
   viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+  viewer.scene.screenSpaceCameraController.enableRotate = false;
+  viewer.scene.screenSpaceCameraController.enableTilt = false;
+  viewer.scene.screenSpaceCameraController.enableLook = false;
 
   let selection = sanitiseSelection(initialSelection);
-  let areaEntity = addAreaEntity();
-  let centreEntity = addCentreEntity();
 
-  const clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
-  clickHandler.setInputAction((event: { position: Cartesian2 }) => {
-    const picked = viewer.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
-    if (!picked) return;
+  function readViewportCentre(): { longitude: number; latitude: number } | null {
+    const canvas = viewer.scene.canvas;
+    const centre = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+    const picked = viewer.camera.pickEllipsoid(centre, viewer.scene.globe.ellipsoid);
+    if (!picked) return null;
+
     const cartographic = Cartographic.fromCartesian(picked);
-    selection = sanitiseSelection({
-      ...selection,
+    return {
       longitude: CesiumMath.toDegrees(cartographic.longitude),
       latitude: CesiumMath.toDegrees(cartographic.latitude),
-    });
-    refreshSelection();
-    onChange({ ...selection });
-  }, ScreenSpaceEventType.LEFT_CLICK);
-
-  function addAreaEntity() {
-    const [west, south, east, north] = selectionToBbox(selection);
-    return viewer.entities.add({
-      id: 'triworld-selected-area',
-      rectangle: {
-        coordinates: Rectangle.fromDegrees(west, south, east, north),
-        material: Color.fromCssColorString('#ff6a00').withAlpha(0.18),
-        outline: true,
-        outlineColor: Color.fromCssColorString('#ff6a00'),
-        outlineWidth: 3,
-        height: 1,
-      },
-    });
+    };
   }
 
-  function addCentreEntity() {
-    return viewer.entities.add({
-      id: 'triworld-selected-centre',
-      position: Cartesian3.fromDegrees(selection.longitude, selection.latitude, 8),
-      point: {
-        pixelSize: 11,
-        color: Color.fromCssColorString('#ff6a00'),
-        outlineColor: Color.WHITE,
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      label: {
-        text: `${formatKilometres(selection.sizeMetres)} selected area`,
-        font: '600 13px Inter, sans-serif',
-        fillColor: Color.fromCssColorString('#1f2937'),
-        showBackground: true,
-        backgroundColor: Color.WHITE.withAlpha(0.92),
-        pixelOffset: new Cartesian2(0, -30),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
+  function syncSelectionFromViewport(notify: boolean): void {
+    const centre = readViewportCentre();
+    if (!centre) return;
+
+    const next = sanitiseSelection({
+      ...selection,
+      longitude: centre.longitude,
+      latitude: centre.latitude,
     });
+
+    const changed = Math.abs(next.longitude - selection.longitude) > 1e-8
+      || Math.abs(next.latitude - selection.latitude) > 1e-8;
+
+    selection = next;
+    if (notify && changed) onChange({ ...selection });
   }
 
-  function refreshSelection(): void {
-    viewer.entities.remove(areaEntity);
-    viewer.entities.remove(centreEntity);
-    areaEntity = addAreaEntity();
-    centreEntity = addCentreEntity();
-    viewer.scene.requestRender();
-  }
+  const removeMoveEndListener = viewer.camera.moveEnd.addEventListener(() => {
+    syncSelectionFromViewport(true);
+  });
 
   function focusSelection(): void {
     void viewer.camera.flyTo({
@@ -138,10 +110,10 @@ export function createAreaSelectionRenderer(
       ),
       orientation: {
         heading: 0,
-        pitch: CesiumMath.toRadians(-82),
+        pitch: CesiumMath.toRadians(-89.5),
         roll: 0,
       },
-      duration: 0.8,
+      duration: 0.65,
     });
   }
 
@@ -150,23 +122,23 @@ export function createAreaSelectionRenderer(
   return {
     viewer,
     getSelection(): AreaSelection {
+      syncSelectionFromViewport(false);
       return { ...selection };
     },
     setCenter(longitude: number, latitude: number): void {
       selection = sanitiseSelection({ ...selection, longitude, latitude });
-      refreshSelection();
-      focusSelection();
       onChange({ ...selection });
+      focusSelection();
     },
     setSize(sizeMetres: number): void {
+      syncSelectionFromViewport(false);
       selection = sanitiseSelection({ ...selection, sizeMetres });
-      refreshSelection();
-      focusSelection();
       onChange({ ...selection });
+      focusSelection();
     },
     focusSelection,
     destroy(): void {
-      clickHandler.destroy();
+      removeMoveEndListener();
       if (!viewer.isDestroyed()) viewer.destroy();
     },
   };
@@ -178,10 +150,4 @@ function sanitiseSelection(selection: AreaSelection): AreaSelection {
     latitude: Math.max(-85, Math.min(85, Number(selection.latitude))),
     sizeMetres: Math.max(500, Math.min(4000, Math.round(Number(selection.sizeMetres)))),
   };
-}
-
-function formatKilometres(sizeMetres: number): string {
-  const kilometres = sizeMetres / 1000;
-  const label = Number.isInteger(kilometres) ? kilometres.toFixed(0) : kilometres.toFixed(1);
-  return `${label} × ${label} km`;
 }
