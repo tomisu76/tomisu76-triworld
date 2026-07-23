@@ -17,6 +17,18 @@ jobs:
       - run: npm install --silent
       - run: npm test -- --reporter=dot
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        id: typecheck
+        continue-on-error: true
+        run: npx tsc --noEmit > typecheck.log 2>&1
+      - name: Upload typecheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-diagnostics
+          path: typecheck.log
+          if-no-files-found: error
+      - name: Fail on typecheck errors
+        if: steps.typecheck.outcome == 'failure'
+        run: cat typecheck.log && exit 1
       - name: Vite production build
         run: npx vite build
