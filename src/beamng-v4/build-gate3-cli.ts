@@ -1,243 +1,333 @@
 /**
- * CLI Generator for TriWorld V4 Gate 3 — Real DEM + Satellite Ortofoto + Coupled Road Corridor (Bánovce nad Bebravou)
+ * TriWorld V4 Gate 3 strict production builder.
+ * Real DEM -> deterministic real OSM road -> Pipeline V3 corridor -> native BeamNG ZIP.
  */
 
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import { buildBanovceRealWorldTerrainAsync } from './gis-terrain';
 import { fetchRealBanovceOrthophoto } from './ortho-generator';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
+import { fetchPrimaryOsmRoadAlignment } from './osm-road-source';
+import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
 import { buildBeamNgZipPackage } from './zip-builder';
 
-function hashFloat64Array(arr: Float32Array): string {
-  const f64 = new Float64Array(arr);
-  const buffer = Buffer.from(f64.buffer);
-  return crypto.createHash('sha256').update(buffer).digest('hex');
-}
+const SIZE = 1024;
+const SQUARE_SIZE = 1.0;
+const MAX_HEIGHT = 500.0;
+const LEVEL_NAME = 'triworld_v4_gate3_osm';
+const HEIGHT_COMPARISON_EPSILON_METRES = 0.01;
+const MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES = 0.05;
 
-function hashFile(filePath: string): string {
-  const buffer = fs.readFileSync(filePath);
-  return crypto.createHash('sha256').update(buffer).digest('hex');
-}
+async function main(): Promise<void> {
+  console.log('Building TriWorld V4 Gate 3: real DEM + real OSM road + native BeamNG terrain...');
 
-async function main() {
-  console.log('Building TriWorld V4 Gate 3 Real DEM Terrain + Satellite Ortofoto + Coupled Road Corridor (Bánovce nad Bebravou)...');
-
-  const gisResult = await buildBanovceRealWorldTerrainAsync({
-    size: 1024,
-    squareSize: 1.0,
-    maxHeight: 500.0,
-    withRoadCorridor: true,
-    levelName: 'triworld_v4_gate3',
+  const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
+    size: SIZE,
+    squareSize: SQUARE_SIZE,
+    maxHeight: MAX_HEIGHT,
+    withRoadCorridor: false,
+    levelName: LEVEL_NAME,
   });
-  
-  const { artifact, transformer, scannedMinElevation, scannedMaxElevation, isRealDem, sampleElevation, corridorPriorityBuffer, rawElevations, modifiedElevations, v3Result } = gisResult;
 
-  console.log(`DEM Elevation Mode: ${isRealDem ? 'REAL Copernicus DEM 30m Raster (Smooth Bilinear)' : 'Analytic Fallback'}`);
-  console.log(`Scanned Terrain Elevation Range: ${scannedMinElevation.toFixed(2)}m to ${scannedMaxElevation.toFixed(2)}m`);
-
-  // --- Strict Numerical Comparison & Hashing ---
-  const heightComparisonEpsilonMetres = 0.01;
-  const minimumMeaningfulCutOrFillMetres = 0.05;
-
-  let terrainCellsTotal = rawElevations.length;
-  let terrainCellsModified = 0;
-  let terrainCellsUnchanged = 0;
-  let terrainCellsLowered = 0;
-  let terrainCellsRaised = 0;
-  let maximumCutMetres = 0;
-  let maximumFillMetres = 0;
-  let absoluteModificationSumAll = 0;
-  let absoluteModificationSumModified = 0;
-
-  let originalTerrainMinimumMetres = Number.POSITIVE_INFINITY;
-  let originalTerrainMaximumMetres = Number.NEGATIVE_INFINITY;
-  let modifiedTerrainMinimumMetres = Number.POSITIVE_INFINITY;
-  let modifiedTerrainMaximumMetres = Number.NEGATIVE_INFINITY;
-
-  for (let i = 0; i < terrainCellsTotal; i++) {
-    const orig = rawElevations[i];
-    const mod = modifiedElevations[i];
-
-    if (orig < originalTerrainMinimumMetres) originalTerrainMinimumMetres = orig;
-    if (orig > originalTerrainMaximumMetres) originalTerrainMaximumMetres = orig;
-    if (mod < modifiedTerrainMinimumMetres) modifiedTerrainMinimumMetres = mod;
-    if (mod > modifiedTerrainMaximumMetres) modifiedTerrainMaximumMetres = mod;
-
-    const diff = mod - orig;
-    const absDiff = Math.abs(diff);
-
-    absoluteModificationSumAll += absDiff;
-
-    if (absDiff >= heightComparisonEpsilonMetres) {
-      terrainCellsModified++;
-      absoluteModificationSumModified += absDiff;
-
-      if (diff < 0) {
-        terrainCellsLowered++;
-        if (absDiff > maximumCutMetres) maximumCutMetres = absDiff;
-      } else {
-        terrainCellsRaised++;
-        if (absDiff > maximumFillMetres) maximumFillMetres = absDiff;
-      }
-    } else {
-      terrainCellsUnchanged++;
-    }
+  if (!sourceTerrain.isRealDem) {
+    throw new Error('Gate 3 rejected: DEM download failed and analytic fallback was used.');
   }
 
-  const meanAbsoluteModificationMetresAllCells = absoluteModificationSumAll / terrainCellsTotal;
-  const meanAbsoluteModificationMetresModifiedCells = terrainCellsModified > 0 ? absoluteModificationSumModified / terrainCellsModified : 0;
-
-  const originalTerrainHash = hashFloat64Array(rawElevations);
-  const modifiedTerrainHash = hashFloat64Array(modifiedElevations);
-  
-  const roadStats = v3Result ? {
-    roadPointCount: v3Result.stations?.length ?? 0,
-    roadTotalLengthMetres: v3Result.stations[v3Result.stations.length - 1]?.station ?? 0,
-    roadSamplesProcessed: v3Result.corridorResult?.triangles?.length ?? 0, // proxy for samples processed
-    roadSamplesOutsideTerrain: 0, // Strict bounds checking throws, so if we reach here it is 0
-  } : { roadPointCount: 0, roadTotalLengthMetres: 0, roadSamplesProcessed: 0, roadSamplesOutsideTerrain: 0 };
-
-  // Generate markers and default spawn sphere at EXACT real DEM surface elevation + 3.0m
-  const markers = generateDiagnosticMarkers(transformer, (x, y) => sampleElevation(x, y));
-  
-  const centerElevation = sampleElevation(512, 512);
-  console.log(`Center Spawn Surface Elevation: ${centerElevation.toFixed(2)}m (Spawn Z: ${(centerElevation + 3.0).toFixed(2)}m)`);
-
-  const { diffusePng, normalPng, isRealSatellite } = await fetchRealBanovceOrthophoto({
-    transformer,
-    textureSize: 1024,
-    corridorPriorityBuffer,
+  const road = await fetchPrimaryOsmRoadAlignment(sourceTerrain.transformer, {
+    minimumLengthMetres: 80,
+    minimumInsetMetres: 12,
   });
 
-  console.log(`Satellite Orthophoto Mode: ${isRealSatellite ? 'REAL ESRI Satellite Imagery' : 'Procedural Fallback'}`);
-  console.log(`Orthophoto PNG Size: ${diffusePng.length} bytes`);
+  console.log(
+    `OSM road selected: way ${road.wayId}, fragment ${road.fragmentIndex}, ` +
+    `${road.name ?? road.highway}, ${road.pointCount} points, ${road.lengthMetres.toFixed(1)}m`,
+  );
+
+  const corridor = applyCoupledRoadTerrainCorridor(
+    sourceTerrain.rawElevations,
+    SIZE,
+    SQUARE_SIZE,
+    MAX_HEIGHT,
+    {
+      roadShapeCentered: road.pointsCentered,
+      roadSourceId: `osm-way-${road.wayId}-fragment-${road.fragmentIndex}`,
+      laneWidth: road.laneWidthMetres,
+    },
+  );
+
+  const heightScale = MAX_HEIGHT / 65535.0;
+  const decodedRange = scanDecodedRange(corridor.heightMapU16, heightScale);
+  const artifact = {
+    ...sourceTerrain.artifact,
+    heightMapU16: corridor.heightMapU16,
+    minimumDecodedElevation: decodedRange.minimum,
+    maximumDecodedElevation: decodedRange.maximum,
+    materialNames: [`${LEVEL_NAME}_ground`],
+  };
+
+  const sampleElevation = createStrictTerrainSampler(
+    corridor.workingElevations,
+    SIZE,
+    SQUARE_SIZE,
+  );
+  const markers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleElevation);
+  const centerElevation = sampleElevation(SIZE / 2, SIZE / 2);
+
+  const { diffusePng, normalPng, isRealSatellite } = await fetchRealBanovceOrthophoto({
+    transformer: sourceTerrain.transformer,
+    textureSize: SIZE,
+    corridorPriorityBuffer: corridor.priorityBuffer,
+  });
+
+  if (!isRealSatellite) {
+    throw new Error('Gate 3 rejected: orthophoto download failed and procedural fallback was used.');
+  }
 
   const levelFiles = generateLevelPackageFiles(artifact, {
-    levelName: 'triworld_v4_gate3',
-    title: 'TriWorld V4 Native Gate 3 (Bánovce Real DEM & Road Corridor)',
-    description: 'Bánovce nad Bebravou real GIS Copernicus DEM + ESRI satellite + 3D Road Corridor',
+    levelName: LEVEL_NAME,
+    title: 'TriWorld V4 Native Gate 3 — Real OSM Road',
+    description: 'Native BeamNG terrain generated from real DEM, real OSM road alignment and real orthophoto.',
     extraMarkers: markers,
     diffusePng,
     normalPng,
   });
 
   const distDir = path.resolve('dist');
-  if (!fs.existsSync(distDir)) {
-    fs.mkdirSync(distDir, { recursive: true });
-  }
+  const artifactsDir = path.resolve('artifacts', 'gate3-osm');
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.mkdirSync(artifactsDir, { recursive: true });
 
-  const zipPath = path.join(distDir, 'triworld_v4_gate3.zip');
-  const manifestPath = path.join(distDir, 'triworld_v4_gate3.manifest.json');
+  const zipPath = path.join(distDir, `${LEVEL_NAME}.zip`);
+  const manifestPath = path.join(distDir, `${LEVEL_NAME}.manifest.json`);
+  const reportJsonPath = path.join(artifactsDir, 'gate3-build-report.json');
+  const reportTextPath = path.join(artifactsDir, 'gate3-build-report.txt');
 
-  const manifest = await buildBeamNgZipPackage(artifact, levelFiles, zipPath, manifestPath, 'triworld_v4_gate3');
+  const manifest = await buildBeamNgZipPackage(
+    artifact,
+    levelFiles,
+    zipPath,
+    manifestPath,
+    LEVEL_NAME,
+  );
+
+  const originalTerrainHash = hashFloat64Array(sourceTerrain.rawElevations);
+  const modifiedTerrainHash = hashFloat64Array(corridor.workingElevations);
   const zipHash = hashFile(zipPath);
+  const safeInset = Math.max(12, road.laneWidthMetres / 2 + 2);
+  const safeHalfExtent = SIZE / 2 - safeInset;
+  const roadSamplesOutsideTerrain = road.pointsCentered.filter(
+    (point) => Math.abs(point.x) > safeHalfExtent + 1e-6 || Math.abs(point.y) > safeHalfExtent + 1e-6,
+  ).length;
 
-  // Append GIS Manifest Metadata
-  const gisManifest = {
-    ...manifest,
-    gate: 'Gate 3 — Real DEM + Satellite Ortofoto + Coupled Road Corridor',
-    gisLocation: 'Bánovce nad Bebravou, Slovakia',
-    demProvider: isRealDem ? 'Copernicus / AWS Terrarium DEM (30m, Bilinear Interpolated)' : 'Analytic Fallback',
-    orthoTextureProvider: isRealSatellite ? 'ESRI World Imagery MapServer (EPSG:4326)' : 'Procedural Fallback',
-    orthoTextureBytes: diffusePng.length,
-    wgs84Center: transformer.origin.centerWgs84,
-    utmCenter: transformer.origin.centerUtm,
-    utmMinCorner: transformer.minUtm,
-    utmMaxCorner: transformer.maxUtm,
-    scannedMinElevation,
-    scannedMaxElevation,
-    centerSpawnSurfaceElevation: centerElevation,
-    diagnosticMarkersCount: markers.length,
+  const terrainCellsUnchanged =
+    corridor.stats.terrainCellsTotal - corridor.stats.terrainCellsModified;
+  const acceptance = {
+    realDemUsed: sourceTerrain.isRealDem,
+    realRoadAlignmentUsed: road.sourceType === 'osm-api-v0.6',
+    noSyntheticProductionFallbackUsed: true,
+    realOrthophotoUsed: isRealSatellite,
+    roadPointCount: road.pointCount >= 2,
+    roadSamplesProcessed: corridor.stats.roadStationCount > 0,
+    roadSamplesOutsideTerrain: roadSamplesOutsideTerrain === 0,
+    terrainCellsModified: corridor.stats.terrainCellsModified >= 100,
+    terrainHashChanged: originalTerrainHash !== modifiedTerrainHash,
+    cutOrFillRequired:
+      corridor.stats.maximumCutMetres >= MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES ||
+      corridor.stats.maximumFillMetres >= MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES,
+    terrainFormatVersion: artifact.version === 9,
+    zipCreated: fs.existsSync(zipPath) && fs.statSync(zipPath).size > 0,
   };
 
-  fs.writeFileSync(manifestPath, JSON.stringify(gisManifest, null, 2), 'utf-8');
-
-  // Build Report
+  const accepted = Object.values(acceptance).every(Boolean);
   const buildReport = {
-    gitBranch: 'rewrite/beamng-native-v4',
+    accepted,
+    generatedAt: new Date().toISOString(),
+    gitBranch: 'codex/beamng-v4-gate3-recovery',
     targetBeamNgVersion: '0.36.4.0',
-    terrainFormatVersion: 9,
-    roadSourceType: 'TriWorld V3 Sumo Plan',
-    roadSourcePathOrIdentifier: 'I9_Banovce_Mountain_Corridor',
-    ...roadStats,
-    terrainCellsTotal,
-    terrainCellsModified,
+    terrainFormatVersion: artifact.version,
+    levelName: LEVEL_NAME,
+    roadSourceType: road.sourceType,
+    roadSourceUrl: road.sourceUrl,
+    roadSourcePathOrIdentifier: `osm-way-${road.wayId}-fragment-${road.fragmentIndex}`,
+    roadWayId: road.wayId,
+    roadFragmentIndex: road.fragmentIndex,
+    roadName: road.name ?? null,
+    roadHighway: road.highway,
+    roadGeometryHash: road.sha256,
+    roadPointCount: road.pointCount,
+    roadStationCount: corridor.stats.roadStationCount,
+    roadTotalLengthMetres: corridor.stats.roadLengthMetres,
+    roadSamplesProcessed: corridor.stats.roadStationCount,
+    roadSamplesOutsideTerrain,
+    roadBoundsCentered: road.boundsCentered,
+    roadLaneWidthMetres: road.laneWidthMetres,
+    terrainCellsTotal: corridor.stats.terrainCellsTotal,
+    terrainCellsModified: corridor.stats.terrainCellsModified,
     terrainCellsUnchanged,
-    terrainCellsLowered,
-    terrainCellsRaised,
-    maximumCutMetres,
-    maximumFillMetres,
-    meanAbsoluteModificationMetresAllCells,
-    meanAbsoluteModificationMetresModifiedCells,
-    originalTerrainMinimumMetres,
-    originalTerrainMaximumMetres,
-    modifiedTerrainMinimumMetres,
-    modifiedTerrainMaximumMetres,
-    terrainHashEncoding: 'Float64 little-endian, row-major, north-to-south rows',
+    terrainCellsLowered: corridor.stats.terrainCellsLowered,
+    terrainCellsRaised: corridor.stats.terrainCellsRaised,
+    maximumCutMetres: corridor.stats.maximumCutMetres,
+    maximumFillMetres: corridor.stats.maximumFillMetres,
+    meanAbsoluteModificationMetresModifiedCells:
+      corridor.stats.meanAbsoluteModificationMetres,
+    heightComparisonEpsilonMetres: HEIGHT_COMPARISON_EPSILON_METRES,
     originalTerrainHash,
     modifiedTerrainHash,
+    terrainHashEncoding: 'Float64 little-endian, row-major, north-to-south rows',
+    scannedMinimumElevation: decodedRange.minimum,
+    scannedMaximumElevation: decodedRange.maximum,
+    centerSpawnSurfaceElevation: centerElevation,
+    orthophotoBytes: diffusePng.length,
+    diagnosticMarkersCount: markers.length,
     zipPath,
     zipSize: fs.statSync(zipPath).size,
     zipHash,
-    gate3ConditionsPassed: true,
+    manifestPath,
+    manifest,
+    acceptance,
   };
 
-  const conditions = [
-    { name: 'realRoadAlignmentUsed', passed: roadStats.roadPointCount >= 2 },
-    { name: 'roadSamplesProcessed', passed: roadStats.roadSamplesProcessed > 0 },
-    { name: 'roadSamplesOutsideTerrain', passed: roadStats.roadSamplesOutsideTerrain === 0 },
-    { name: 'terrainCellsModified', passed: terrainCellsModified >= 100 },
-    { name: 'originalTerrainHash', passed: originalTerrainHash !== modifiedTerrainHash },
-    { name: 'cutOrFillRequired', passed: maximumCutMetres >= 0.05 || maximumFillMetres >= 0.05 }
-  ];
+  writeReportsAtomically(reportJsonPath, reportTextPath, buildReport);
 
-  let failedCondition = conditions.find(c => !c.passed);
-  if (failedCondition) {
-    throw new Error(`Gate 3 Acceptance Condition Failed: ${failedCondition.name}`);
+  if (!accepted) {
+    const failed = Object.entries(acceptance)
+      .filter(([, passed]) => !passed)
+      .map(([name]) => name)
+      .join(', ');
+    throw new Error(`Gate 3 acceptance failed: ${failed}. See ${reportJsonPath}.`);
   }
 
-  const artifactsDir = path.resolve('artifacts', 'gate3');
-  if (!fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir, { recursive: true });
-  
-  const tmpJsonPath = path.join(artifactsDir, 'gate3-build-report.tmp.json');
-  const tmpTxtPath = path.join(artifactsDir, 'gate3-build-report.tmp.txt');
-  const finalJsonPath = path.join(artifactsDir, 'gate3-build-report.json');
-  const finalTxtPath = path.join(artifactsDir, 'gate3-build-report.txt');
+  const targetModsPath =
+    process.env.TRIWORLD_BEAMNG_MOD_PATH ??
+    `C:\\Users\\tomisu\\AppData\\Local\\BeamNG\\BeamNG.drive\\current\\mods\\${LEVEL_NAME}.zip`;
+  fs.mkdirSync(path.dirname(targetModsPath), { recursive: true });
+  fs.copyFileSync(zipPath, targetModsPath);
 
-  fs.writeFileSync(tmpJsonPath, JSON.stringify(buildReport, null, 2));
-  fs.writeFileSync(tmpTxtPath, Object.entries(buildReport).map(([k, v]) => `${k}: ${v}`).join('\n'));
-  
-  fs.renameSync(tmpJsonPath, finalJsonPath);
-  fs.renameSync(tmpTxtPath, finalTxtPath);
-
-  console.log('SUCCESS!');
-  console.log(`Zip package: ${zipPath}`);
-  console.log(`Manifest path: ${manifestPath}`);
-  
-  // Cleanup old Gate 0, 1, 2 zip variants
-  const modsPath1 = 'C:\\Users\\tomisu\\AppData\\Local\\BeamNG\\BeamNG.drive\\current\\mods';
-  const modsPath2 = 'C:\\Users\\tomisu\\AppData\\Local\\BeamNG.drive\\0.36\\mods';
-  
-  for (const modsDir of [modsPath1, modsPath2]) {
-    if (!fs.existsSync(modsDir)) continue;
-    ['triworld_v4_gate0.zip', 'triworld_v4_gate1.zip', 'triworld_v4_gate2.zip'].forEach(file => {
-      const p = path.join(modsDir, file);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    });
-    
-    // Copy the new zip
-    const targetZipPath = path.join(modsDir, 'triworld_v4_gate3.zip');
-    fs.copyFileSync(zipPath, targetZipPath);
-    const targetHash = hashFile(targetZipPath);
-    console.log(`Copied ZIP to ${targetZipPath} (Hash: ${targetHash} | Matches: ${targetHash === zipHash})`);
-    if (targetHash !== zipHash) throw new Error('ZIP copy hash mismatch!');
+  const installedHash = hashFile(targetModsPath);
+  if (installedHash !== zipHash) {
+    throw new Error(`Installed ZIP hash mismatch: source=${zipHash}, installed=${installedHash}`);
   }
+
+  const completedReport = {
+    ...buildReport,
+    installedZipPath: targetModsPath,
+    installedZipHash: installedHash,
+  };
+  writeReportsAtomically(reportJsonPath, reportTextPath, completedReport);
+
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({ ...manifest, gate3Report: completedReport }, null, 2),
+    'utf8',
+  );
+
+  console.log('GATE 3 ACCEPTED');
+  console.log(`OSM way: ${road.wayId} (${road.name ?? road.highway})`);
+  console.log(`Road length: ${corridor.stats.roadLengthMetres.toFixed(1)}m`);
+  console.log(`Modified terrain cells: ${corridor.stats.terrainCellsModified}`);
+  console.log(
+    `Maximum cut/fill: ${corridor.stats.maximumCutMetres.toFixed(3)}m / ` +
+    `${corridor.stats.maximumFillMetres.toFixed(3)}m`,
+  );
+  console.log(`ZIP: ${zipPath}`);
+  console.log(`Installed: ${targetModsPath}`);
+  console.log(`Report: ${reportJsonPath}`);
 }
 
-main().catch((err) => {
-  console.error('Gate 3 CLI Build Failed:', err);
+function hashFloat64Array(values: Float32Array): string {
+  const float64 = new Float64Array(values);
+  return crypto.createHash('sha256').update(Buffer.from(float64.buffer)).digest('hex');
+}
+
+function hashFile(filePath: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function scanDecodedRange(
+  values: Uint16Array,
+  heightScale: number,
+): { minimum: number; maximum: number } {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const decoded = value * heightScale;
+    minimum = Math.min(minimum, decoded);
+    maximum = Math.max(maximum, decoded);
+  }
+  return { minimum, maximum };
+}
+
+function createStrictTerrainSampler(
+  elevations: Float32Array,
+  size: number,
+  squareSize: number,
+): (xMetres: number, yMetres: number) => number {
+  return (xMetres: number, yMetres: number): number => {
+    const column = xMetres / squareSize;
+    const row = (size - 1) - yMetres / squareSize;
+    if (
+      !Number.isFinite(column) || !Number.isFinite(row) ||
+      column < 0 || column > size - 1 || row < 0 || row > size - 1
+    ) {
+      throw new RangeError(`Terrain sample outside grid: (${xMetres}, ${yMetres}).`);
+    }
+
+    const c0 = Math.min(size - 2, Math.floor(column));
+    const r0 = Math.min(size - 2, Math.floor(row));
+    const c1 = c0 + 1;
+    const r1 = r0 + 1;
+    const tx = column - c0;
+    const ty = row - r0;
+    const z00 = elevations[r0 * size + c0];
+    const z10 = elevations[r0 * size + c1];
+    const z01 = elevations[r1 * size + c0];
+    const z11 = elevations[r1 * size + c1];
+    const z0 = z00 + (z10 - z00) * tx;
+    const z1 = z01 + (z11 - z01) * tx;
+    return z0 + (z1 - z0) * ty;
+  };
+}
+
+function writeReportsAtomically(
+  jsonPath: string,
+  textPath: string,
+  report: Record<string, unknown>,
+): void {
+  const acceptance = report.acceptance as Record<string, boolean>;
+  const text = [
+    `TriWorld V4 Gate 3 OSM: ${report.accepted ? 'ACCEPTED' : 'REJECTED'}`,
+    `Generated: ${report.generatedAt}`,
+    `Road: ${report.roadSourcePathOrIdentifier} (${report.roadName ?? report.roadHighway})`,
+    `Road points/stations: ${report.roadPointCount} / ${report.roadStationCount}`,
+    `Road length: ${Number(report.roadTotalLengthMetres).toFixed(1)} m`,
+    `Modified cells: ${report.terrainCellsModified}`,
+    `Maximum cut: ${Number(report.maximumCutMetres).toFixed(3)} m`,
+    `Maximum fill: ${Number(report.maximumFillMetres).toFixed(3)} m`,
+    `Original terrain hash: ${report.originalTerrainHash}`,
+    `Modified terrain hash: ${report.modifiedTerrainHash}`,
+    `ZIP: ${report.zipPath}`,
+    `ZIP SHA-256: ${report.zipHash}`,
+    '',
+    'Acceptance:',
+    ...Object.entries(acceptance).map(([name, passed]) => `- ${name}: ${passed ? 'PASS' : 'FAIL'}`),
+    '',
+  ].join('\n');
+
+  atomicWrite(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
+  atomicWrite(textPath, text);
+}
+
+function atomicWrite(filePath: string, content: string): void {
+  const temporaryPath = `${filePath}.tmp`;
+  fs.writeFileSync(temporaryPath, content, 'utf8');
+  if (fs.existsSync(filePath)) fs.rmSync(filePath);
+  fs.renameSync(temporaryPath, filePath);
+}
+
+main().catch((error) => {
+  console.error('Gate 3 CLI Build Failed:', error);
   process.exit(1);
 });
