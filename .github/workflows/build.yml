@@ -14,6 +14,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm test
-      - run: npm run build
+      - run: npm install --silent
+      - run: npm test -- --reporter=dot
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+      - name: Vite production build
+        run: npx vite build
