@@ -25,13 +25,18 @@ async function main(): Promise<void> {
     roadTerrain.sampleElevation,
   ).filter((marker) => marker.name !== 'spawns_default');
 
+  // Visual hotfix: the road surface is rendered exclusively by the native
+  // ASPHALT terrain layer. The previous DecalRoad overlay produced BeamNG's
+  // magenta missing-material fringe on some installations. Keeping the
+  // heightfield and material layer as the single visual source also avoids
+  // z-fighting and duplicated road edges.
   const levelFiles = generateLevelPackageFiles(roadTerrain.artifact, {
     title: 'TriWorld V4 Native Gate 3 — Jankov Vŕšok Mountain Circuit',
-    description: 'Closed two-lane road designed in 3D first, with deterministic cut/fill terrain adaptation and AI DecalRoad.',
+    description: 'Closed two-lane road designed in 3D first, with deterministic cut/fill terrain adaptation and native asphalt terrain surface.',
     extraMarkers: diagnosticMarkers,
-    extraObjects: [roadTerrain.roadObject],
+    extraObjects: [],
     defaultSpawnObject: roadTerrain.roadSpawn,
-    supportsTraffic: true,
+    supportsTraffic: false,
   });
 
   const distDir = path.resolve('dist');
@@ -49,12 +54,15 @@ async function main(): Promise<void> {
   const roadManifest = {
     ...manifest,
     gate: 3,
-    pipeline: 'road-first-cut-fill-v1',
+    pipeline: 'road-first-cut-fill-v1.1',
     gisLocation: 'Jankov Vŕšok / Bánovce nad Bebravou, Slovakia',
     wgs84Center: base.transformer.origin.centerWgs84,
     road: roadTerrain.stats,
     roadMaterial: 'ASPHALT',
-    roadObject: 'triworld_v4_mountain_loop',
+    visualRoadMode: 'native-terrain-layer-only',
+    decalRoadOverlay: false,
+    trafficSupport: false,
+    visualFix: 'Removed DecalRoad overlay to eliminate magenta missing-material fringe and z-fighting.',
     terrainCorridor: {
       roadWidthMetres: 7.2,
       shoulderWidthMetres: 1.4,
