@@ -58,15 +58,16 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
       minimumBlendWidth: 22,
       maximumBlendWidth: 70,
     });
+    const maximumCoordinate = (result.artifact.size - 1) * result.artifact.squareSize;
     for (let index = 10; index < result.roadStations.length - 1; index += 31) {
       const station = result.roadStations[index];
       for (const side of [-1, 1]) {
         let previous = result.sampleElevation(station.x, station.y);
         for (let offset = 1; offset <= 60; offset++) {
-          const current = result.sampleElevation(
-            station.x + station.normalX * offset * side,
-            station.y + station.normalY * offset * side,
-          );
+          const x = station.x + station.normalX * offset * side;
+          const y = station.y + station.normalY * offset * side;
+          if (x < 1 || y < 1 || x > maximumCoordinate - 1 || y > maximumCoordinate - 1) break;
+          const current = result.sampleElevation(x, y);
           expect(Math.abs(current - previous)).toBeLessThan(2.5);
           previous = current;
         }
