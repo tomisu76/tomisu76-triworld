@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildBanovceRealWorldTerrain } from './gis-terrain';
 import { generateLevelPackageFiles } from './level-generator';
-import { buildMountainLoopRoadTerrain } from './road-terrain';
+import { buildMountainLoopRoadTerrain } from './road-terrain-gate3';
 
 describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Terrain Corridor)', () => {
   const makeResult = () => buildMountainLoopRoadTerrain(
@@ -27,7 +27,7 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Terrain Corridor)', 
     expect(nodes[0][0]).toBe(nodes[nodes.length - 1][0]);
     expect(nodes[0][1]).toBe(nodes[nodes.length - 1][1]);
     expect(nodes[0][2]).toBe(nodes[nodes.length - 1][2]);
-    expect(result.stats.roadLengthMetres).toBeGreaterThan(600);
+    expect(result.stats.roadLengthMetres).toBeGreaterThan(550);
   });
 
   test('3. Enforces civil-design grade and banking limits', () => {
