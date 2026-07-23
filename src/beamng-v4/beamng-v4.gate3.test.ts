@@ -1,28 +1,29 @@
 import { describe, expect, test } from 'vitest';
 import { buildBanovceRealWorldTerrain } from './gis-terrain';
 import { generateLevelPackageFiles } from './level-generator';
-import { buildMountainLoopRoadTerrain } from './road-terrain-gate3';
+import { buildBakedMountainLoopRoadTerrain } from './road-terrain-gate3-baked';
 
-describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Terrain Corridor)', () => {
-  const makeResult = () => buildMountainLoopRoadTerrain(
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+
+describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Baked Terrain Corridor)', () => {
+  const makeResult = () => buildBakedMountainLoopRoadTerrain(
     buildBanovceRealWorldTerrain({ size: 256, squareSize: 1.0, maxHeight: 500 }),
   );
 
-  test('1. Builds a native v9 terrain with asphalt layer', () => {
+  test('1. Builds native v9 terrain with one valid material and a separate road mask', () => {
     const result = makeResult();
     expect(result.artifact.version).toBe(9);
     expect(result.artifact.size).toBe(256);
-    expect(result.artifact.materialNames).toEqual(['triworld_v4_ground', 'ASPHALT']);
+    expect(result.artifact.materialNames).toEqual(['triworld_v4_ground']);
+    expect(result.artifact.layerMapU8.every((value) => value === 0)).toBe(true);
+    expect(result.roadMaskU8.some((value) => value === 255)).toBe(true);
     expect(result.stats.modifiedSampleCount).toBeGreaterThan(10_000);
     expect(result.stats.asphaltSampleCount).toBeGreaterThan(1_000);
   });
 
-  test('2. Produces a closed, dense DecalRoad loop', () => {
+  test('2. Preserves the closed, dense designed road alignment', () => {
     const result = makeResult();
     const nodes = result.roadObject.nodes as number[][];
-    expect(result.roadObject.class).toBe('DecalRoad');
-    expect(result.roadObject.material).toBe('triworld_v4_road_decal');
-    expect(result.roadObject.drivability).toBe(1);
     expect(nodes.length).toBeGreaterThan(80);
     expect(nodes[0][0]).toBe(nodes[nodes.length - 1][0]);
     expect(nodes[0][1]).toBe(nodes[nodes.length - 1][1]);
@@ -54,17 +55,18 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Terrain Corridor)', 
     for (const index of untouchedIndices) {
       expect(result.deformedElevations[index]).toBe(result.originalElevations[index]);
       expect(result.artifact.layerMapU8[index]).toBe(0);
+      expect(result.roadMaskU8[index]).toBe(0);
     }
   });
 
-  test('6. Level package contains road object, road-aligned spawn and portable materials', () => {
+  test('6. Level package has no DecalRoad and no secondary terrain material', () => {
     const result = makeResult();
     const files = generateLevelPackageFiles(result.artifact, {
       title: 'TriWorld V4 Native Gate 3',
-      description: 'Road-first mountain circuit with cut/fill terrain corridor',
-      extraObjects: [result.roadObject],
+      description: 'Road-first mountain circuit with baked road appearance',
       defaultSpawnObject: result.roadSpawn,
-      supportsTraffic: true,
+      supportsTraffic: false,
+      diffusePng: result.bakedDiffusePng,
     });
 
     const objects = files.itemsLevelJson.split('\n').map((line) => JSON.parse(line));
@@ -72,21 +74,30 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 3 (Road-First Terrain Corridor)', 
     const terrain = JSON.parse(files.terrainJson);
     const info = JSON.parse(files.infoJson);
 
-    expect(objects.some((object: Record<string, unknown>) => object.class === 'DecalRoad')).toBe(true);
+    expect(objects.some((object: Record<string, unknown>) => object.class === 'DecalRoad')).toBe(false);
     expect(objects.some((object: Record<string, unknown>) => object.name === 'spawns_default')).toBe(true);
-    expect(materials.ASPHALT.class).toBe('TerrainMaterial');
-    expect(materials.ASPHALT.groundmodelName).toBe('ASPHALT');
-    expect(materials.triworld_v4_road_decal.class).toBe('Material');
-    expect(terrain.materials).toEqual(['triworld_v4_ground', 'ASPHALT']);
-    expect(info.supportsTraffic).toBe(true);
-    expect(Array.from(files.roadDiffusePng!.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(materials.triworld_v4_ground.class).toBe('TerrainMaterial');
+    expect(materials.ASPHALT).toBeUndefined();
+    expect(materials.triworld_v4_road_decal).toBeUndefined();
+    expect(terrain.materials).toEqual(['triworld_v4_ground']);
+    expect(info.supportsTraffic).toBe(false);
+    expect(Array.from(files.diffusePng.subarray(0, 8))).toEqual(PNG_SIGNATURE);
+    expect(files.roadDiffusePng).toBeUndefined();
   });
 
-  test('7. Repeated runs are byte-identical', () => {
+  test('7. Baked ground texture visibly contains both road and terrain pixels', () => {
+    const result = makeResult();
+    expect(Array.from(result.bakedDiffusePng.subarray(0, 8))).toEqual(PNG_SIGNATURE);
+    expect(result.bakedDiffusePng.length).toBeGreaterThan(10_000);
+  });
+
+  test('8. Repeated runs are byte-identical', () => {
     const first = makeResult();
     const second = makeResult();
     expect(first.artifact.heightMapU16).toEqual(second.artifact.heightMapU16);
     expect(first.artifact.layerMapU8).toEqual(second.artifact.layerMapU8);
+    expect(first.roadMaskU8).toEqual(second.roadMaskU8);
+    expect(first.bakedDiffusePng).toEqual(second.bakedDiffusePng);
     expect(first.roadNodes).toEqual(second.roadNodes);
     expect(first.stats).toEqual(second.stats);
   });
