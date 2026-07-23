@@ -126,8 +126,8 @@ async function main(): Promise<void> {
 
   const markers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
 
-  // Generate Road Surface Mesh V3
-  const roadMesh = generateRoadSurfaceMesh(road, sampleTerrainElevation);
+  // Generate Road Surface Mesh V3 with dense 1.0m stations from Pipeline V3
+  const roadMesh = generateRoadSurfaceMesh(road, sampleTerrainElevation, corridor.v3Result.stations);
   const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
   const asphaltPng = generateAsphaltTexturePng(256);
 

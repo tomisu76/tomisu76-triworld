@@ -24,14 +24,40 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 4 (Road Surface Mesh V3)', () => {
 
   const dummyTerrainSampler = (x: number, y: number) => 349.5; // 349.5m flat terrain
 
-  it('1. Generates Road Surface Mesh V3 with zero negative clearance', () => {
+  it('1. Generates Road Surface Mesh V3 with zero negative clearance and bounded clearance', () => {
     const mesh = generateRoadSurfaceMesh(dummyRoad, dummyTerrainSampler);
 
     expect(mesh.vertexCount).toBe(6);
     expect(mesh.triangleCount).toBe(4);
     expect(mesh.segmentCount).toBe(2);
     expect(mesh.clearanceStats.negativeCount).toBe(0);
-    expect(mesh.clearanceStats.minMetres).toBeGreaterThanOrEqual(0.05);
+    expect(mesh.clearanceStats.minMetres).toBe(0.04);
+    expect(mesh.clearanceStats.maxMetres).toBe(0.04);
+  });
+
+  it('1b. Generates dense Road Surface Mesh V3 from 1.0m stations with strictly bounded clearance <= 0.08m', () => {
+    const dummyStations = Array.from({ length: 853 }, (_, i) => ({
+      station: i * 1.0,
+      x: -400 + i * 0.9,
+      y: -400 + i * 0.9,
+      tangentX: 0.7071,
+      tangentY: 0.7071,
+      normalX: -0.7071,
+      normalY: 0.7071,
+      groundZ: 350.0,
+      designZ: 350.0,
+      formationZ: 349.75,
+      surfaceZ: 350.05,
+    }));
+
+    const mesh = generateRoadSurfaceMesh(dummyRoad, dummyTerrainSampler, dummyStations);
+
+    expect(mesh.vertexCount).toBe(1706);
+    expect(mesh.triangleCount).toBe(1704);
+    expect(mesh.segmentCount).toBe(852);
+    expect(mesh.clearanceStats.negativeCount).toBe(0);
+    expect(mesh.clearanceStats.minMetres).toBe(0.04);
+    expect(mesh.clearanceStats.maxMetres).toBeLessThanOrEqual(0.08);
   });
 
   it('2. Exports valid Collada 1.4.1 DAE with Z_UP up-axis and correct material', () => {
