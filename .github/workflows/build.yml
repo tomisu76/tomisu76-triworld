@@ -8,11 +8,38 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run build
+      - run: npm install --silent
+      - name: Test
+        run: npm test -- --reporter=dot
+      - name: TypeScript typecheck
+        id: typecheck
+        continue-on-error: true
+        run: npx tsc --noEmit > typecheck.log 2>&1
+      - name: Upload typecheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-road-typecheck
+          path: typecheck.log
+          if-no-files-found: error
+      - name: Fail on typecheck errors
+        if: steps.typecheck.outcome == 'failure'
+        run: cat typecheck.log && exit 1
+      - name: Web production build
+        run: npx vite build
+      - name: BeamNG road-first ZIP
+        run: npm run beamng:v4:road
+      - name: Upload BeamNG package
+        uses: actions/upload-artifact@v4
+        with:
+          name: triworld-v4-road-first
+          path: |
+            dist/triworld_v4_road_first.zip
+            dist/triworld_v4_road_first.manifest.json
+          if-no-files-found: error
