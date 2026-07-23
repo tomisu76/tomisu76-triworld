@@ -1,12 +1,11 @@
 import {
-  Cartesian2,
   Cartesian3,
-  Cartographic,
   Color,
   EllipsoidTerrainProvider,
   ImageryLayer,
   Math as CesiumMath,
   OpenStreetMapImageryProvider,
+  SceneMode,
   Viewer,
 } from 'cesium';
 import type { AreaSelection } from './osm-scene';
@@ -34,6 +33,7 @@ export function createAreaSelectionRenderer(
     homeButton: false,
     infoBox: false,
     navigationHelpButton: false,
+    sceneMode: SceneMode.SCENE2D,
     sceneModePicker: false,
     selectionIndicator: false,
     shouldAnimate: false,
@@ -60,23 +60,24 @@ export function createAreaSelectionRenderer(
   if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
   viewer.scene.fog.enabled = false;
   viewer.scene.backgroundColor = Color.fromCssColorString('#07111f');
-  viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
-  viewer.scene.screenSpaceCameraController.enableRotate = false;
-  viewer.scene.screenSpaceCameraController.enableTilt = false;
-  viewer.scene.screenSpaceCameraController.enableLook = false;
+
+  const controls = viewer.scene.screenSpaceCameraController;
+  controls.enableTranslate = true;
+  controls.enableZoom = true;
+  controls.enableRotate = false;
+  controls.enableTilt = false;
+  controls.enableLook = false;
+  controls.enableCollisionDetection = false;
 
   let selection = sanitiseSelection(initialSelection);
 
   function readViewportCentre(): { longitude: number; latitude: number } | null {
-    const canvas = viewer.scene.canvas;
-    const centre = new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
-    const picked = viewer.camera.pickEllipsoid(centre, viewer.scene.globe.ellipsoid);
-    if (!picked) return null;
+    const centre = viewer.camera.positionCartographic;
+    if (!centre) return null;
 
-    const cartographic = Cartographic.fromCartesian(picked);
     return {
-      longitude: CesiumMath.toDegrees(cartographic.longitude),
-      latitude: CesiumMath.toDegrees(cartographic.latitude),
+      longitude: CesiumMath.toDegrees(centre.longitude),
+      latitude: CesiumMath.toDegrees(centre.latitude),
     };
   }
 
@@ -108,12 +109,7 @@ export function createAreaSelectionRenderer(
         selection.latitude,
         Math.max(1800, selection.sizeMetres * 1.85),
       ),
-      orientation: {
-        heading: 0,
-        pitch: CesiumMath.toRadians(-89.5),
-        roll: 0,
-      },
-      duration: 0.65,
+      duration: 0.45,
     });
   }
 
