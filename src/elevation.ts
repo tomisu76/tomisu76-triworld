@@ -1,7 +1,3 @@
-const TILE_SIZE = 256;
-const TERRAIN_ZOOM = 14;
-const MAX_CONCURRENT_REQUESTS = 6;
-
 export interface ElevationSelection {
   longitude: number;
   latitude: number;
@@ -16,46 +12,50 @@ export interface ElevationModel {
   sampleRelativeLocal(xMetres: number, yMetres: number): number;
 }
 
-type TileCoordinate = { x: number; y: number };
-type DecodedTile = TileCoordinate & { pixels: Uint8ClampedArray };
+type ElevationGrid = {
+  width: number;
+  height: number;
+  values: Float32Array;
+  source: string;
+};
 
 export async function loadElevationModel(selection: ElevationSelection): Promise<ElevationModel> {
-  const bounds = selectionBounds(selection);
-  const tileCoordinates = tilesForBounds(bounds, TERRAIN_ZOOM, 1);
-  const tiles = await loadTiles(tileCoordinates, TERRAIN_ZOOM);
-  const tileMap = new Map(tiles.map((tile) => [tileKey(tile.x, tile.y), tile]));
+  const gridSize = clamp(Math.round(selection.sizeMetres / 12.5) + 1, 81, 401);
+  const query = new URLSearchParams({
+    lat: selection.latitude.toFixed(9),
+    lon: selection.longitude.toFixed(9),
+    size: String(Math.round(selection.sizeMetres)),
+    grid: String(gridSize),
+  });
+  const response = await fetch(`/api/elevation-grid?${query.toString()}`);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Official DMR 5.0 request failed (${response.status}): ${detail.slice(0, 300)}`);
+  }
 
-  const sampleAbsoluteGeographic = (longitude: number, latitude: number): number => {
-    const global = longitudeLatitudeToGlobalPixel(longitude, latitude, TERRAIN_ZOOM);
-    const pixelX = global.x - 0.5;
-    const pixelY = global.y - 0.5;
-    const x0 = Math.floor(pixelX);
-    const y0 = Math.floor(pixelY);
-    const tx = pixelX - x0;
-    const ty = pixelY - y0;
+  const width = parseHeaderInteger(response.headers.get('X-TriWorld-Grid-Width'), 'grid width');
+  const height = parseHeaderInteger(response.headers.get('X-TriWorld-Grid-Height'), 'grid height');
+  const source = response.headers.get('X-TriWorld-Elevation-Source') ?? 'GKÚ SR DMR 5.0 WCS';
+  const arrayBuffer = await response.arrayBuffer();
+  const values = new Float32Array(arrayBuffer);
+  if (values.length !== width * height) {
+    throw new Error(`Elevation payload has ${values.length} samples, expected ${width * height}`);
+  }
 
-    const h00 = readGlobalPixel(tileMap, x0, y0, TERRAIN_ZOOM);
-    const h10 = readGlobalPixel(tileMap, x0 + 1, y0, TERRAIN_ZOOM);
-    const h01 = readGlobalPixel(tileMap, x0, y0 + 1, TERRAIN_ZOOM);
-    const h11 = readGlobalPixel(tileMap, x0 + 1, y0 + 1, TERRAIN_ZOOM);
-    const north = mix(h00, h10, tx);
-    const south = mix(h01, h11, tx);
-    return mix(north, south, ty);
-  };
+  const grid: ElevationGrid = { width, height, values, source };
+  const anchorElevationMetres = sampleGrid(grid, 0, 0, selection.sizeMetres);
+  const sampledRange = computeRange(values);
+  if (sampledRange.maximum - sampledRange.minimum < 0.25) {
+    throw new Error('Official DMR grid is unexpectedly flat; refusing to build an invalid terrain');
+  }
 
-  const anchorElevationMetres = sampleAbsoluteGeographic(selection.longitude, selection.latitude);
-  const metresPerDegreeLatitude = 111_320;
-  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.cos((selection.latitude * Math.PI) / 180);
-
-  const sampleAbsoluteLocal = (xMetres: number, yMetres: number): number => {
-    const longitude = selection.longitude + xMetres / metresPerDegreeLongitude;
-    const latitude = selection.latitude + yMetres / metresPerDegreeLatitude;
-    return sampleAbsoluteGeographic(longitude, latitude);
-  };
+  const sampleAbsoluteLocal = (xMetres: number, yMetres: number): number => (
+    sampleGrid(grid, xMetres, yMetres, selection.sizeMetres)
+  );
 
   return {
-    source: `Mapzen Terrain Tiles on AWS Open Data · Terrarium z${TERRAIN_ZOOM}`,
-    zoom: TERRAIN_ZOOM,
+    source: `${source} · 1 m LiDAR DMR, resampled to ${width}×${height}`,
+    zoom: 0,
     anchorElevationMetres,
     sampleAbsoluteLocal,
     sampleRelativeLocal(xMetres: number, yMetres: number): number {
@@ -64,136 +64,51 @@ export async function loadElevationModel(selection: ElevationSelection): Promise
   };
 }
 
-async function loadTiles(coordinates: TileCoordinate[], zoom: number): Promise<DecodedTile[]> {
-  const result = new Array<DecodedTile>(coordinates.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(MAX_CONCURRENT_REQUESTS, coordinates.length) }, async () => {
-    while (cursor < coordinates.length) {
-      const index = cursor++;
-      const coordinate = coordinates[index];
-      result[index] = await loadTile(coordinate.x, coordinate.y, zoom);
-    }
-  });
-  await Promise.all(workers);
-  return result;
+/**
+ * GeoTIFF rows are north-to-south. Canonical local Y is positive north.
+ * Therefore local north maps to raster row 0 and local south maps to the last row.
+ */
+function sampleGrid(grid: ElevationGrid, xMetres: number, yMetres: number, sizeMetres: number): number {
+  const half = sizeMetres / 2;
+  const u = clamp((xMetres + half) / sizeMetres, 0, 1);
+  const v = clamp((half - yMetres) / sizeMetres, 0, 1);
+  const pixelX = u * (grid.width - 1);
+  const pixelY = v * (grid.height - 1);
+  const x0 = Math.floor(pixelX);
+  const y0 = Math.floor(pixelY);
+  const x1 = Math.min(grid.width - 1, x0 + 1);
+  const y1 = Math.min(grid.height - 1, y0 + 1);
+  const tx = pixelX - x0;
+  const ty = pixelY - y0;
+  const northWest = grid.values[y0 * grid.width + x0];
+  const northEast = grid.values[y0 * grid.width + x1];
+  const southWest = grid.values[y1 * grid.width + x0];
+  const southEast = grid.values[y1 * grid.width + x1];
+  const north = mix(northWest, northEast, tx);
+  const south = mix(southWest, southEast, tx);
+  return mix(north, south, ty);
 }
 
-async function loadTile(x: number, y: number, zoom: number): Promise<DecodedTile> {
-  const proxyUrl = `/api/elevation-tile?z=${zoom}&x=${x}&y=${y}`;
-  const directUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${x}/${y}.png`;
-  let response = await fetch(proxyUrl);
-
-  if (!response.ok && import.meta.env.DEV) {
-    response = await fetch(directUrl);
+function computeRange(values: Float32Array): { minimum: number; maximum: number } {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    minimum = Math.min(minimum, value);
+    maximum = Math.max(maximum, value);
   }
-
-  if (!response.ok) {
-    throw new Error(`Elevation tile ${zoom}/${x}/${y} failed (${response.status}).`);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+    throw new Error('Elevation grid contains no finite samples');
   }
+  return { minimum, maximum };
+}
 
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob, {
-    colorSpaceConversion: 'none',
-    premultiplyAlpha: 'none',
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) {
-    bitmap.close();
-    throw new Error('Canvas 2D is unavailable for elevation decoding.');
+function parseHeaderInteger(value: string | null, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 2 || parsed > 4096) {
+    throw new Error(`Invalid ${label} header: ${value ?? 'missing'}`);
   }
-
-  context.drawImage(bitmap, 0, 0, TILE_SIZE, TILE_SIZE);
-  bitmap.close();
-  const pixels = context.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
-  return { x, y, pixels };
-}
-
-function readGlobalPixel(
-  tiles: Map<string, DecodedTile>,
-  globalPixelX: number,
-  globalPixelY: number,
-  zoom: number,
-): number {
-  const tileCount = 2 ** zoom;
-  const tileXUnwrapped = floorDivide(globalPixelX, TILE_SIZE);
-  const tileY = clamp(floorDivide(globalPixelY, TILE_SIZE), 0, tileCount - 1);
-  const tileX = positiveModulo(tileXUnwrapped, tileCount);
-  const pixelX = positiveModulo(globalPixelX, TILE_SIZE);
-  const pixelY = positiveModulo(globalPixelY, TILE_SIZE);
-  const tile = tiles.get(tileKey(tileX, tileY));
-  if (!tile) throw new Error(`Elevation tile ${zoom}/${tileX}/${tileY} was not loaded.`);
-
-  const offset = (pixelY * TILE_SIZE + pixelX) * 4;
-  const red = tile.pixels[offset];
-  const green = tile.pixels[offset + 1];
-  const blue = tile.pixels[offset + 2];
-  return red * 256 + green + blue / 256 - 32_768;
-}
-
-function tilesForBounds(
-  bounds: readonly [number, number, number, number],
-  zoom: number,
-  marginTiles: number,
-): TileCoordinate[] {
-  const [west, south, east, north] = bounds;
-  const northWest = longitudeLatitudeToTile(west, north, zoom);
-  const southEast = longitudeLatitudeToTile(east, south, zoom);
-  const tileCount = 2 ** zoom;
-  const minX = Math.floor(Math.min(northWest.x, southEast.x)) - marginTiles;
-  const maxX = Math.floor(Math.max(northWest.x, southEast.x)) + marginTiles;
-  const minY = Math.max(0, Math.floor(Math.min(northWest.y, southEast.y)) - marginTiles);
-  const maxY = Math.min(tileCount - 1, Math.floor(Math.max(northWest.y, southEast.y)) + marginTiles);
-  const coordinates: TileCoordinate[] = [];
-
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      coordinates.push({ x: positiveModulo(x, tileCount), y });
-    }
-  }
-  return coordinates;
-}
-
-function selectionBounds(selection: ElevationSelection): readonly [number, number, number, number] {
-  const halfExtent = selection.sizeMetres / 2;
-  const metresPerDegreeLatitude = 111_320;
-  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.cos((selection.latitude * Math.PI) / 180);
-  const latitudeDelta = halfExtent / metresPerDegreeLatitude;
-  const longitudeDelta = halfExtent / metresPerDegreeLongitude;
-  return [
-    selection.longitude - longitudeDelta,
-    selection.latitude - latitudeDelta,
-    selection.longitude + longitudeDelta,
-    selection.latitude + latitudeDelta,
-  ];
-}
-
-function longitudeLatitudeToGlobalPixel(longitude: number, latitude: number, zoom: number): { x: number; y: number } {
-  const tile = longitudeLatitudeToTile(longitude, latitude, zoom);
-  return { x: tile.x * TILE_SIZE, y: tile.y * TILE_SIZE };
-}
-
-function longitudeLatitudeToTile(longitude: number, latitude: number, zoom: number): { x: number; y: number } {
-  const tileCount = 2 ** zoom;
-  const safeLatitude = clamp(latitude, -85.05112878, 85.05112878);
-  const latitudeRadians = (safeLatitude * Math.PI) / 180;
-  const x = ((longitude + 180) / 360) * tileCount;
-  const y = (1 - Math.asinh(Math.tan(latitudeRadians)) / Math.PI) / 2 * tileCount;
-  return { x, y };
-}
-
-function floorDivide(value: number, divisor: number): number {
-  return Math.floor(value / divisor);
-}
-
-function positiveModulo(value: number, divisor: number): number {
-  return ((value % divisor) + divisor) % divisor;
-}
-
-function tileKey(x: number, y: number): string {
-  return `${x}/${y}`;
+  return parsed;
 }
 
 function mix(a: number, b: number, t: number): number {
