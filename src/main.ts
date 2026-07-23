@@ -80,20 +80,21 @@ function renderSelectionMode(message?: { type: 'error' | 'info'; text: string })
 
     <button id="generate" class="generate-button" type="button">
       <span>▲</span>
-      <span><strong>Generate Area</strong><small>Fetch OSM and compile canonical geometry</small></span>
+      <span><strong>Generate Area</strong><small>Fetch OSM, real DEM and compile canonical geometry</small></span>
     </button>
 
     <div id="status" class="status-card ${message?.type ?? 'idle'}">
       <strong>${message?.type === 'error' ? 'Generation failed' : 'Ready to generate'}</strong>
-      <span>${message?.text ?? 'No road or terrain calculation runs until Generate Area is pressed.'}</span>
+      <span>${message?.text ?? 'No road or elevation calculation runs until Generate Area is pressed.'}</span>
     </div>
 
     <section class="workflow-section output-section">
       <h3>Output settings</h3>
-      <label class="field-label">Resolution</label>
-      <div class="readonly-control">Adaptive grid · approximately 12.5 m spacing</div>
+      <label class="field-label">Canonical grid</label>
+      <div class="readonly-control">Approximately 12.5 m spacing · real DEM heights · 1.0× vertical scale</div>
       <label class="check-row"><input type="checkbox" checked disabled /> Include OSM road features</label>
-      <p class="muted-note">Real elevation data is not enabled yet. Terrain remains an explicit procedural preview.</p>
+      <label class="check-row"><input type="checkbox" checked disabled /> Include Mapzen/AWS elevation tiles</label>
+      <p class="muted-note">Z values use real metre differences relative to the selected map centre. No vertical exaggeration is applied.</p>
     </section>
   `, `
     <div class="map-tabs">
@@ -149,7 +150,7 @@ async function generateSelectedArea(): Promise<void> {
   const generateButton = requireElement<HTMLButtonElement>('#generate');
   generateButton.disabled = true;
   generateButton.classList.add('busy');
-  setStatus('working', 'Downloading OpenStreetMap data for the selected square…');
+  setStatus('working', 'Downloading OpenStreetMap roads and real elevation tiles…');
 
   try {
     await nextPaint();
@@ -185,7 +186,7 @@ function renderGeneratedMode(result: OsmSceneResult): void {
         <span class="step-number complete">✓</span>
         <div>
           <h2>Area generated</h2>
-          <p>The selected square has been fetched and compiled.</p>
+          <p>The selected square has been fetched and compiled with real elevation.</p>
         </div>
       </div>
       <button id="changeArea" class="secondary-action" type="button">Change selected area</button>
@@ -193,8 +194,10 @@ function renderGeneratedMode(result: OsmSceneResult): void {
 
     <section class="result-stats">
       <div><span>Area</span><strong>${formatArea(selection.sizeMetres)}</strong></div>
+      <div><span>Relief</span><strong>${result.stats.reliefMetres.toFixed(1)} m</strong></div>
+      <div><span>Elevation range</span><strong>${result.stats.minimumElevationMetres.toFixed(0)}–${result.stats.maximumElevationMetres.toFixed(0)} m</strong></div>
+      <div><span>Centre elevation</span><strong>${result.stats.anchorElevationMetres.toFixed(1)} m</strong></div>
       <div><span>OSM ways</span><strong>${result.stats.waysImported.toLocaleString()}</strong></div>
-      <div><span>Road length</span><strong>${(result.stats.totalLengthMetres / 1000).toFixed(2)} km</strong></div>
       <div><span>Triangles</span><strong>${manifest.triangles.toLocaleString()}</strong></div>
     </section>
 
@@ -202,8 +205,10 @@ function renderGeneratedMode(result: OsmSceneResult): void {
       <h3>Generated data</h3>
       <dl class="result-list">
         <div><dt>Centre</dt><dd>${coordinateLabel}</dd></div>
+        <div><dt>Elevation source</dt><dd>${escapeHtml(result.stats.elevationSource)}</dd></div>
         <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
         <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
+        <div><dt>Road length</dt><dd>${(result.stats.totalLengthMetres / 1000).toFixed(2)} km</dd></div>
         <div><dt>Mesh hash</dt><dd>${manifest.hash}</dd></div>
       </dl>
       ${renderRoadNames(result.stats)}
@@ -213,7 +218,7 @@ function renderGeneratedMode(result: OsmSceneResult): void {
       <h3>Preview layers</h3>
       <label class="check-row"><input id="map" type="checkbox" checked /> OpenStreetMap</label>
       <label class="range-row"><span>Map opacity</span><input id="mapOpacity" type="range" min="0" max="100" value="72" /></label>
-      <label class="check-row"><input id="terrain" type="checkbox" checked /> Procedural terrain</label>
+      <label class="check-row"><input id="terrain" type="checkbox" checked /> Real DEM terrain</label>
       <label class="check-row"><input id="road" type="checkbox" checked /> OSM road mesh</label>
       <label class="check-row"><input id="wire" type="checkbox" checked /> Triangle edges</label>
       <label class="check-row"><input id="points" type="checkbox" /> Canonical vertices</label>
@@ -227,7 +232,7 @@ function renderGeneratedMode(result: OsmSceneResult): void {
     <div class="status-card ${manifest.validation.valid ? 'success' : 'error'}">
       <strong>${manifest.validation.valid ? 'Geometry validation passed' : 'Geometry validation failed'}</strong>
       <span>${manifest.validation.valid
-        ? 'OSM road plan geometry is real. Elevation is still a procedural preview.'
+        ? 'OSM roads and DEM elevation are real. Canonical Z uses metres at 1.0× vertical scale.'
         : escapeHtml(manifest.validation.errors.slice(0, 3).join(' · '))}</span>
     </div>
   `, `
@@ -236,7 +241,7 @@ function renderGeneratedMode(result: OsmSceneResult): void {
       <button id="localView" class="map-tab" type="button">▰ 3D Preview</button>
       <button class="map-tab" type="button" disabled>◇ Cesium Preview</button>
     </div>
-    <div class="map-hint generated">Generated ${formatArea(selection.sizeMetres)} · ${result.stats.waysImported} OSM ways</div>
+    <div class="map-hint generated">Generated ${formatArea(selection.sizeMetres)} · ${result.stats.reliefMetres.toFixed(1)} m relief</div>
   `);
 
   sceneRenderer = createTriWorldRenderer('cesiumContainer', result.scene);
@@ -285,7 +290,7 @@ function renderShell(sidebar: string, mapOverlay: string): string {
       <section class="map-workspace">
         <div id="cesiumContainer"></div>
         ${mapOverlay}
-        <div class="map-attribution-note">OpenStreetMap map context · selection only until Generate Area</div>
+        <div class="map-attribution-note">OpenStreetMap context · elevation Mapzen Terrain Tiles / AWS Open Data</div>
       </section>
     </main>`;
 }
