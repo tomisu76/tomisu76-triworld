@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:gate3": "vite-node src/beamng-v4/build-gate3-cli.ts",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:gate3": "vitest run src/beamng-v4/beamng-v4.gate3.test.ts"
   },
   "dependencies": {
     "@types/pngjs": "^6.0.5",

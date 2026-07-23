@@ -9,7 +9,7 @@ export function generateAnalyticGate0Terrain(
   const sampleCount = size * size;
   const heightsFloat32 = new Float32Array(sampleCount);
   const heightMapU16 = new Uint16Array(sampleCount);
-  const layerMapU8 = new Uint8Array(sampleCount); // All 0s for triworld_v4_ground
+  const layerMapU8 = new Uint8Array(sampleCount);
 
   const heightScale = maxHeight / 65536.0;
 
@@ -17,10 +17,9 @@ export function generateAnalyticGate0Terrain(
   let maxZ = Number.NEGATIVE_INFINITY;
 
   for (let r = 0; r < size; r++) {
-    const y = r; // integer sample coordinate 0..511
+    const y = r;
     for (let c = 0; c < size; c++) {
-      const x = c; // integer sample coordinate 0..511
-
+      const x = c;
       const unquantizedZ = 10.0 + 0.01 * x + 0.02 * y + 0.0001 * x * x;
       if (!Number.isFinite(unquantizedZ) || unquantizedZ < 0 || unquantizedZ > maxHeight) {
         throw new Error(`Elevation at (${x}, ${y}) is out of bounds: ${unquantizedZ}`);
@@ -30,16 +29,12 @@ export function generateAnalyticGate0Terrain(
       heightsFloat32[idx] = unquantizedZ;
       minZ = Math.min(minZ, unquantizedZ);
       maxZ = Math.max(maxZ, unquantizedZ);
-
-      // Quantization
-      const encoded = Math.min(65535, Math.max(0, Math.round(unquantizedZ / heightScale)));
-      heightMapU16[idx] = encoded;
+      heightMapU16[idx] = Math.min(65535, Math.max(0, Math.round(unquantizedZ / heightScale)));
     }
   }
 
   let minDecodedZ = Number.POSITIVE_INFINITY;
   let maxDecodedZ = Number.NEGATIVE_INFINITY;
-
   for (let i = 0; i < sampleCount; i++) {
     const decoded = terrainPosition[2] + heightMapU16[i] * heightScale;
     minDecodedZ = Math.min(minDecodedZ, decoded);
@@ -77,6 +72,11 @@ export function generateAnalyticGate0Terrain(
   const artifact: BeamNGTerrainArtifact = {
     version: 9,
     size,
+    squareSize,
+    maxHeight,
+    heightScale,
+    minimumDecodedElevation: minDecodedZ,
+    maximumDecodedElevation: maxDecodedZ,
     heightMapU16,
     layerMapU8,
     materialNames: ['triworld_v4_ground'],

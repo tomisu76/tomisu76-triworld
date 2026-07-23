@@ -1,6 +1,11 @@
 export interface BeamNGTerrainArtifact {
   version: number;
   size: number;
+  squareSize: number;
+  maxHeight: number;
+  heightScale: number;
+  minimumDecodedElevation: number;
+  maximumDecodedElevation: number;
   heightMapU16: Uint16Array;
   layerMapU8: Uint8Array;
   materialNames: readonly string[];
