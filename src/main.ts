@@ -14,9 +14,9 @@ const app = requireElement<HTMLDivElement>('#app');
 app.innerHTML = `
   <main class="loading-screen">
     <div class="loading-card">
-      <p class="eyebrow">TriWorld v0.4</p>
-      <h1>Compiling the real road network…</h1>
-      <p>Downloading the current OpenStreetMap elements for the 1 × 1 km site and converting highway centre-lines into canonical indexed triangles.</p>
+      <p class="eyebrow">TriWorld stable · 2 km test</p>
+      <h1>Compiling the larger real road network…</h1>
+      <p>Downloading the current OpenStreetMap elements for the 2 × 2 km site and converting highway centre-lines into canonical indexed triangles.</p>
       <div class="loading-bar"><span></span></div>
     </div>
   </main>`;
@@ -44,15 +44,16 @@ app.innerHTML = `
   <main class="shell">
     <header>
       <div>
-        <p class="eyebrow">TriWorld v0.4 · OSM road compiler</p>
-        <h1>${sourceIsLive ? 'Real roads. Canonical triangles.' : 'OSM fallback active.'}</h1>
+        <p class="eyebrow">TriWorld stable · 2 km area test</p>
+        <h1>${sourceIsLive ? 'Larger real area. Same canonical pipeline.' : 'OSM fallback active.'}</h1>
         <p class="lede">${sourceIsLive
-          ? `Driveable OpenStreetMap ways inside a 1 × 1 km site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
+          ? `Driveable OpenStreetMap ways inside a 2 × 2 km site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
           : `The live OSM request failed, so the previous synthetic diagnostic scene is shown. <strong>${escapeHtml(sourceError ?? '')}</strong>`}</p>
       </div>
       <div class="stats">
         <span>${manifest.vertices.toLocaleString()} vertices</span>
         <span>${manifest.triangles.toLocaleString()} triangles</span>
+        <span class="good">2 KM TEST</span>
         <span class="${sourceIsLive ? 'good' : 'bad'}">${sourceIsLive ? 'LIVE OSM ROADS' : 'FALLBACK'}</span>
         <span class="${manifest.validation.valid ? 'good' : 'bad'}">${manifest.validation.valid ? 'VALID' : 'INVALID'}</span>
       </div>
@@ -79,7 +80,7 @@ app.innerHTML = `
           <div><dt>Road source</dt><dd>${sourceIsLive ? 'OSM API v0.6' : 'Synthetic fallback'}</dd></div>
           <div><dt>Terrain source</dt><dd>${sourceIsLive ? 'Procedural preview' : 'Synthetic preview'}</dd></div>
           <div><dt>Frame</dt><dd>ENU / Z-up</dd></div>
-          <div><dt>Area</dt><dd>${sourceIsLive ? '1,000 × 1,000 m' : formatBounds()}</dd></div>
+          <div><dt>Area</dt><dd>${sourceIsLive ? '2,000 × 2,000 m' : formatBounds()}</dd></div>
           <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
           <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
           ${osmStats ? `<div><dt>OSM ways</dt><dd>${osmStats.waysImported}</dd></div>` : ''}
