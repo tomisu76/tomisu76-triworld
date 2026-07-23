@@ -92,7 +92,10 @@ async function loadTile(x: number, y: number, zoom: number): Promise<DecodedTile
   }
 
   const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
+  const bitmap = await createImageBitmap(blob, {
+    colorSpaceConversion: 'none',
+    premultiplyAlpha: 'none',
+  });
   const canvas = document.createElement('canvas');
   canvas.width = TILE_SIZE;
   canvas.height = TILE_SIZE;
