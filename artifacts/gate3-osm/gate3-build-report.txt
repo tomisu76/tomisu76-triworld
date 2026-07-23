@@ -1,5 +1,5 @@
 TriWorld V4 Gate 3 OSM: ACCEPTED
-Generated: 2026-07-23T22:47:04.328Z
+Generated: 2026-07-23T22:52:54.191Z
 Road: osm-way-109459194-fragment-0 (tertiary)
 Road points/stations: 23 / 876
 Road length: 852.4 m
@@ -8,8 +8,8 @@ Maximum cut: 2.407 m
 Maximum fill: 1.614 m
 Original terrain hash: f43f5894491c09a6226b9fe970872280ec9da1feed87a6bed0f1fb0d7459bb7b
 Modified terrain hash: 3753b76e9048083eb0fa3b8773aae11e5c63612b0658a26b8a37089658a613c6
-ZIP: C:\GeoCrashSim\tomisu76-triworld\dist\triworld_v4_gate3_osm_texturetest_a.zip
-ZIP SHA-256: ed5b94ec737c534496674a9e5a4820ffdcb4cd95f5244e07df53c9066317d5cc
+ZIP: C:\GeoCrashSim\tomisu76-triworld\dist\triworld_v4_gate3_osm_texturetest_b.zip
+ZIP SHA-256: b4448924c9ff00ecdcf39408a0d3a21cc4abd1829a6b87453e129993de368963
 
 Acceptance:
 - realDemUsed: PASS

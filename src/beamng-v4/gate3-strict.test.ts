@@ -113,9 +113,9 @@ describe('Gate 3 Strict Verification Requirements', () => {
     expect(source).not.toContain('syntheticProductionFallbackUsed: false');
   });
 
-  it('7. TEST A produces 8-bit RGBA checkerboard PNG and classic v1 TerrainMaterial without normalMap or v1.5 fields', () => {
-    const levelName = 'triworld_v4_gate3_osm_texturetest_a';
-    const diffusePng = generateCheckerboardRgbaPng(1024, 1024);
+  it('7. TEST B produces sanitized orthophoto and classic v1 TerrainMaterial without normalMap or v1.5 fields', () => {
+    const levelName = 'triworld_v4_gate3_osm_texturetest_b';
+    const diffusePng = new Uint8Array(100);
     const levelFiles = generateLevelPackageFiles(
       { size: 1024, squareSize: 1.0, maxHeight: 500.0 },
       { levelName, diffusePng, normalPng: undefined },

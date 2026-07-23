@@ -1,10 +1,10 @@
 {
   "accepted": true,
-  "generatedAt": "2026-07-23T22:47:04.328Z",
+  "generatedAt": "2026-07-23T22:52:54.191Z",
   "gitBranch": "codex/beamng-v4-gate3-recovery",
   "targetBeamNgVersion": "0.36.4.0",
   "terrainFormatVersion": 9,
-  "levelName": "triworld_v4_gate3_osm_texturetest_a",
+  "levelName": "triworld_v4_gate3_osm_texturetest_b",
   "roadSourceType": "osm-api-v0.6",
   "roadSourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=18.345908174257257%2C48.720901760622816%2C18.359333701239922%2C48.73042365069897",
   "roadSourcePathOrIdentifier": "osm-way-109459194-fragment-0",
@@ -40,12 +40,45 @@
   "scannedMinimumElevation": 303.9749752040894,
   "scannedMaximumElevation": 493.1181811245899,
   "centerSpawnSurfaceElevation": 413.60955810546875,
-  "orthophotoBytes": 5865,
+  "orthophotoBytes": 2096832,
+  "testBOrthoDetails": {
+    "width": 1024,
+    "height": 1024,
+    "bitDepth": 8,
+    "colorType": "RGBA (Color type 6)",
+    "sha256": "805942a0daf636154603d26022b05fdcf7ce1d24f3a6d84c56c43a7536af1c5e",
+    "corners": {
+      "tl": [
+        115,
+        117,
+        92,
+        255
+      ],
+      "tr": [
+        2,
+        12,
+        3,
+        255
+      ],
+      "bl": [
+        35,
+        53,
+        35,
+        255
+      ],
+      "br": [
+        42,
+        67,
+        37,
+        255
+      ]
+    }
+  },
   "diagnosticMarkersCount": 6,
-  "zipPath": "C:\\GeoCrashSim\\tomisu76-triworld\\dist\\triworld_v4_gate3_osm_texturetest_a.zip",
-  "zipSize": 1667199,
-  "zipHash": "ed5b94ec737c534496674a9e5a4820ffdcb4cd95f5244e07df53c9066317d5cc",
-  "manifestPath": "C:\\GeoCrashSim\\tomisu76-triworld\\dist\\triworld_v4_gate3_osm_texturetest_a.manifest.json",
+  "zipPath": "C:\\GeoCrashSim\\tomisu76-triworld\\dist\\triworld_v4_gate3_osm_texturetest_b.zip",
+  "zipSize": 3732992,
+  "zipHash": "b4448924c9ff00ecdcf39408a0d3a21cc4abd1829a6b87453e129993de368963",
+  "manifestPath": "C:\\GeoCrashSim\\tomisu76-triworld\\dist\\triworld_v4_gate3_osm_texturetest_b.manifest.json",
   "manifest": {
     "targetBeamNgBuild": "0.36.4.0",
     "terrainVersion": 9,
@@ -69,17 +102,17 @@
     },
     "heightMapHash": "83d91bcc67e2e0d5e70d6bd63af4dd62467b7c8dbad0adb6d591d2488e13c700",
     "layerMapHash": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
-    "terHash": "6c11e565265926133b3cc4482607f1b827180b7458d1f45404a87cd4a8b40bc6",
+    "terHash": "6313d0ee9300148a395079f88c175b65758b4057e1b95d7eec1afe266aa34c3c",
     "packagedFileHashes": {
-      "levels/triworld_v4_gate3_osm_texturetest_a/art/terrains/ground_d.png": "b8de318b97efdb9bf0fb71b59439f62a1841e4fcf4deeb3cf5fd21bd3493c6e0",
-      "levels/triworld_v4_gate3_osm_texturetest_a/art/terrains/ground_n.png": "d5e5c65b39a7cf7b49a7c3cf0c8aab0dc3d209783b2ec06f24394be51f3be27c",
-      "levels/triworld_v4_gate3_osm_texturetest_a/art/terrains/main.materials.json": "440f69b6c2e661d39288c2f0507a8ae0a621180636b38a58e0a26cd21748ee05",
-      "levels/triworld_v4_gate3_osm_texturetest_a/art/terrains/terrain.ter": "6c11e565265926133b3cc4482607f1b827180b7458d1f45404a87cd4a8b40bc6",
-      "levels/triworld_v4_gate3_osm_texturetest_a/art/terrains/terrain.terrain.json": "3886307f5b03f01d671a981c6293989f2d61e9dfcabfbdeb3167dfb1e5a50a39",
-      "levels/triworld_v4_gate3_osm_texturetest_a/info.json": "0133e0920c79ec6b9a1f2fb2f121f17860384f8c6672fe0547dce67871abf482",
-      "levels/triworld_v4_gate3_osm_texturetest_a/main/items.level.json": "29a3d379e1acc38d265ff0675d427ad90c640b506fe5d3ffdf1cd7239349d7dd"
+      "levels/triworld_v4_gate3_osm_texturetest_b/art/terrains/ground_d.png": "805942a0daf636154603d26022b05fdcf7ce1d24f3a6d84c56c43a7536af1c5e",
+      "levels/triworld_v4_gate3_osm_texturetest_b/art/terrains/ground_n.png": "d5e5c65b39a7cf7b49a7c3cf0c8aab0dc3d209783b2ec06f24394be51f3be27c",
+      "levels/triworld_v4_gate3_osm_texturetest_b/art/terrains/main.materials.json": "29d2f7d2292ab596d8af1cb72f9358274ef745ba7f4cc88cd7d29da12d6ff034",
+      "levels/triworld_v4_gate3_osm_texturetest_b/art/terrains/terrain.ter": "6313d0ee9300148a395079f88c175b65758b4057e1b95d7eec1afe266aa34c3c",
+      "levels/triworld_v4_gate3_osm_texturetest_b/art/terrains/terrain.terrain.json": "244dc518f1e6576e9a5cedd4514ed496e825f1d34d5365c196eff4eb2355a1f8",
+      "levels/triworld_v4_gate3_osm_texturetest_b/info.json": "fc3bf2f3effc24f1550f88eec0e9561b2fd6a7cf534179f0d635401a7c79ee6c",
+      "levels/triworld_v4_gate3_osm_texturetest_b/main/items.level.json": "b802440dddbca65a944ce0147dbbb41b83663ee0b43ca08512506db5b959e3c7"
     },
-    "zipManifestHash": "ed5b94ec737c534496674a9e5a4820ffdcb4cd95f5244e07df53c9066317d5cc"
+    "zipManifestHash": "b4448924c9ff00ecdcf39408a0d3a21cc4abd1829a6b87453e129993de368963"
   },
   "acceptance": {
     "realDemUsed": true,
@@ -95,6 +128,6 @@
     "terrainFormatVersion": true,
     "zipCreated": true
   },
-  "installedZipPath": "C:\\Users\\tomisu\\AppData\\Local\\BeamNG\\BeamNG.drive\\current\\mods\\triworld_v4_gate3_osm_texturetest_a.zip",
-  "installedZipHash": "ed5b94ec737c534496674a9e5a4820ffdcb4cd95f5244e07df53c9066317d5cc"
+  "installedZipPath": "C:\\Users\\tomisu\\AppData\\Local\\BeamNG\\BeamNG.drive\\current\\mods\\triworld_v4_gate3_osm_texturetest_b.zip",
+  "installedZipHash": "b4448924c9ff00ecdcf39408a0d3a21cc4abd1829a6b87453e129993de368963"
 }

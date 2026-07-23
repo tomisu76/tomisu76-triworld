@@ -75,43 +75,40 @@ export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions 
     if (res.ok) {
       const buffer = new Uint8Array(await res.arrayBuffer());
       if (buffer.length > 50000 && buffer[0] === 137 && buffer[1] === 80) {
-        const normalPng = generateSolidPng(textureSize, textureSize, 128, 128, 255);
-        let finalDiffusePng = buffer;
+        const decoded = PNG.sync.read(Buffer.from(buffer));
+        const w = decoded.width;
+        const h = decoded.height;
 
-        if (options.corridorPriorityBuffer) {
-          try {
-            const decoded = PNG.sync.read(Buffer.from(buffer));
-            const priority = options.corridorPriorityBuffer;
-            // Decode sizes usually match textureSize (e.g. 1024x1024)
-            const w = decoded.width;
-            const h = decoded.height;
-            if (priority.length === w * h) {
-              for (let i = 0; i < priority.length; i++) {
-                const p = priority[i];
-                if (p === 3) {
-                  // PRIORITY_GROUND_ROAD_SURFACE -> Asphalt gray
-                  decoded.data[i * 4 + 0] = 60;
-                  decoded.data[i * 4 + 1] = 60;
-                  decoded.data[i * 4 + 2] = 65;
-                } else if (p === 1) {
-                  // PRIORITY_SLOPE -> Tint dirt/grass
-                  decoded.data[i * 4 + 0] = Math.min(255, decoded.data[i * 4 + 0] * 0.8 + 40);
-                  decoded.data[i * 4 + 1] = Math.min(255, decoded.data[i * 4 + 1] * 0.8 + 30);
-                  decoded.data[i * 4 + 2] = Math.min(255, decoded.data[i * 4 + 2] * 0.8 + 20);
-                }
-              }
-              finalDiffusePng = new Uint8Array(PNG.sync.write(decoded));
-            }
-          } catch (err) {
-            console.warn('Failed to overlay road corridor on ortho:', err);
+        const sanitized = new PNG({
+          width: w,
+          height: h,
+          colorType: 6,
+          bitDepth: 8,
+          inputHasAlpha: true,
+        });
+
+        // Rotate 180 degrees (flip both horizontally and vertically) to align with BeamNG UVs
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const srcIdx = (y * w + x) * 4;
+            const dstX = w - 1 - x;
+            const dstY = h - 1 - y;
+            const dstIdx = (dstY * w + dstX) * 4;
+
+            sanitized.data[dstIdx + 0] = decoded.data[srcIdx + 0];
+            sanitized.data[dstIdx + 1] = decoded.data[srcIdx + 1];
+            sanitized.data[dstIdx + 2] = decoded.data[srcIdx + 2];
+            sanitized.data[dstIdx + 3] = 255;
           }
         }
 
+        const finalDiffusePng = new Uint8Array(PNG.sync.write(sanitized));
+
         return {
           diffusePng: finalDiffusePng,
-          normalPng,
-          width: textureSize,
-          height: textureSize,
+          normalPng: generateSolidPng(w, h, 128, 128, 255),
+          width: w,
+          height: h,
           isRealSatellite: true,
         };
       }

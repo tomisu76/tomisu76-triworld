@@ -15,15 +15,17 @@ import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
 import { generateCheckerboardRgbaPng } from './texture-generator';
 import { buildBeamNgZipPackage } from './zip-builder';
 
+import { PNG } from 'pngjs';
+
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate3_osm_texturetest_a';
+const LEVEL_NAME = 'triworld_v4_gate3_osm_texturetest_b';
 const HEIGHT_COMPARISON_EPSILON_METRES = 0.01;
 const MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES = 0.05;
 
 async function main(): Promise<void> {
-  console.log('Building TriWorld V4 Gate 3 Diagnostic TEST A: RGBA Checkerboard PNG...');
+  console.log('Building TriWorld V4 Gate 3 Diagnostic TEST B: Sanitized Orthophoto (180deg Rotated)...');
 
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
@@ -77,12 +79,41 @@ async function main(): Promise<void> {
   const markers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleElevation);
   const centerElevation = sampleElevation(SIZE / 2, SIZE / 2);
 
-  const diffusePng = generateCheckerboardRgbaPng(1024, 1024);
+  const { diffusePng, isRealSatellite, width, height } = await fetchRealBanovceOrthophoto({
+    transformer: sourceTerrain.transformer,
+    textureSize: SIZE,
+  });
+
+  if (!isRealSatellite) {
+    throw new Error('TEST B rejected: Orthophoto download failed.');
+  }
+
+  // Save standalone PNG for manual inspection
+  const testDir = path.resolve('artifacts', 'gate3-texture-test');
+  fs.mkdirSync(testDir, { recursive: true });
+  fs.writeFileSync(path.join(testDir, 'ground_d.png'), diffusePng);
+
+  const decodedSanitized = PNG.sync.read(Buffer.from(diffusePng));
+  const getCornerPixel = (x: number, y: number): [number, number, number, number] => {
+    const idx = (y * decodedSanitized.width + x) * 4;
+    return [
+      decodedSanitized.data[idx],
+      decodedSanitized.data[idx + 1],
+      decodedSanitized.data[idx + 2],
+      decodedSanitized.data[idx + 3],
+    ];
+  };
+  const corners = {
+    tl: getCornerPixel(0, 0),
+    tr: getCornerPixel(decodedSanitized.width - 1, 0),
+    bl: getCornerPixel(0, decodedSanitized.height - 1),
+    br: getCornerPixel(decodedSanitized.width - 1, decodedSanitized.height - 1),
+  };
 
   const levelFiles = generateLevelPackageFiles(artifact, {
     levelName: LEVEL_NAME,
-    title: 'TriWorld V4 Native Gate 3 — Texture Test A',
-    description: 'Diagnostic build for testing 8-bit RGBA checkerboard PNG texture mapping in BeamNG.',
+    title: 'TriWorld V4 Native Gate 3 — Texture Test B',
+    description: 'Diagnostic build testing sanitized, 180-deg rotated 8-bit RGBA satellite orthophoto.',
     extraMarkers: markers,
     diffusePng,
     normalPng: undefined,
@@ -174,6 +205,14 @@ async function main(): Promise<void> {
     scannedMaximumElevation: decodedRange.maximum,
     centerSpawnSurfaceElevation: centerElevation,
     orthophotoBytes: diffusePng.length,
+    testBOrthoDetails: {
+      width,
+      height,
+      bitDepth: 8,
+      colorType: 'RGBA (Color type 6)',
+      sha256: hashFile(path.join(testDir, 'ground_d.png')),
+      corners,
+    },
     diagnosticMarkersCount: markers.length,
     zipPath,
     zipSize: fs.statSync(zipPath).size,
