@@ -3,6 +3,7 @@ import {
   generateRoadSurfaceMesh,
   exportRoadMeshToDae,
   generateAsphaltTexturePng,
+  parseDaeVerticesAndAuditClearance,
 } from './road-mesh-exporter';
 import { generateLevelPackageFiles } from './level-generator';
 import type { OsmRoadAlignment } from './osm-road-source';
@@ -60,7 +61,7 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 4 (Road Surface Mesh V3)', () => {
     expect(mesh.clearanceStats.maxMetres).toBeLessThanOrEqual(0.08);
   });
 
-  it('2. Exports valid Collada 1.4.1 DAE with Z_UP up-axis and correct material', () => {
+  it('2. Exports valid Collada 1.4.1 DAE and parses vertices back for DAE clearance audit', () => {
     const mesh = generateRoadSurfaceMesh(dummyRoad, dummyTerrainSampler);
     const daeXml = exportRoadMeshToDae(mesh, 'triworld_asphalt');
 
@@ -69,6 +70,12 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 4 (Road Surface Mesh V3)', () => {
     expect(daeXml).toContain('<material id="triworld_asphalt-material" name="triworld_asphalt">');
     expect(daeXml).toContain('<geometry id="RoadMesh-mesh" name="RoadMesh">');
     expect(daeXml).toContain('<instance_material symbol="triworld_asphalt-material" target="#triworld_asphalt-material"/>');
+
+    const daeAudit = parseDaeVerticesAndAuditClearance(daeXml, dummyTerrainSampler);
+    expect(daeAudit.parsedVertexCount).toBe(6);
+    expect(daeAudit.negativeCount).toBe(0);
+    expect(daeAudit.minClearance).toBe(0.04);
+    expect(daeAudit.maxClearance).toBe(0.04);
   });
 
   it('3. Generates 8-bit RGBA asphalt texture PNG', () => {

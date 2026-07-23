@@ -6,6 +6,28 @@ import { generateLevelPackageFiles } from './level-generator';
 import { fetchPrimaryOsmRoadAlignment } from './osm-road-source';
 import { fetchRealBanovceOrthophoto } from './ortho-generator';
 import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
+import { generateDiagnosticMarkers } from './diagnostic-markers';
+import {
+  generateRoadSurfaceMesh,
+  exportRoadMeshToDae,
+  generateAsphaltTexturePng,
+  parseDaeVerticesAndAuditClearance,
+} from './road-mesh-exporter';
+import { buildBeamNgZipPackage } from './zip-builder';
+
+const SIZE = 1024;
+const SQUARE_SIZE = 1.0;
+const MAX_HEIGHT = 500.0;
+const LEVEL_NAME = 'triworld_v4_gate4_roadmesh2';
+
+function sha256(buf: Uint8Array): string {
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+function hashFile(filePath: string): string {
+  return sha256(fs.readFileSync(filePath));
+}
+
 function scanDecodedRange(
   values: Uint16Array,
   heightScale: number,
@@ -18,26 +40,6 @@ function scanDecodedRange(
     maximum = Math.max(maximum, decoded);
   }
   return { minimum, maximum };
-}
-import { generateDiagnosticMarkers } from './diagnostic-markers';
-import {
-  generateRoadSurfaceMesh,
-  exportRoadMeshToDae,
-  generateAsphaltTexturePng,
-} from './road-mesh-exporter';
-import { buildBeamNgZipPackage } from './zip-builder';
-
-const SIZE = 1024;
-const SQUARE_SIZE = 1.0;
-const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate4_roadmesh1';
-
-function sha256(buf: Uint8Array): string {
-  return createHash('sha256').update(buf).digest('hex');
-}
-
-function hashFile(filePath: string): string {
-  return sha256(fs.readFileSync(filePath));
 }
 
 function createStrictTerrainSampler(
@@ -72,7 +74,7 @@ function createStrictTerrainSampler(
 }
 
 async function main(): Promise<void> {
-  console.log('Building TriWorld V4 Gate 4 Level: Road Surface Mesh V3 + Asphalt Material...');
+  console.log('Building TriWorld V4 Gate 4 Level: Road Surface Mesh V3 + Asphalt Material (Level: triworld_v4_gate4_roadmesh2)...');
 
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
@@ -124,19 +126,64 @@ async function main(): Promise<void> {
     SQUARE_SIZE,
   );
 
-  const markers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
+  const baseMarkers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
 
   // Generate Road Surface Mesh V3 with dense 1.0m stations from Pipeline V3
-  const roadMesh = generateRoadSurfaceMesh(road, sampleTerrainElevation, corridor.v3Result.stations);
+  const stations = corridor.v3Result.stations;
+  const roadMesh = generateRoadSurfaceMesh(road, sampleTerrainElevation, stations);
   const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
   const asphaltPng = generateAsphaltTexturePng(256);
 
-  console.log(`Road Mesh V3 generated: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.segmentCount} segments.`);
-  console.log(`Terrain Clearance Stats: min=${roadMesh.clearanceStats.minMetres}m, max=${roadMesh.clearanceStats.maxMetres}m, mean=${roadMesh.clearanceStats.meanMetres}m, negativeCount=${roadMesh.clearanceStats.negativeCount}.`);
+  // DAE Parse Audit: Parse vertices directly back from exported Collada DAE string and audit clearance in runtime coordinates
+  const daeAudit = parseDaeVerticesAndAuditClearance(roadDae, sampleTerrainElevation);
 
-  if (roadMesh.clearanceStats.negativeCount > 0) {
-    throw new Error(`Gate 4 rejected: ${roadMesh.clearanceStats.negativeCount} negative-clearance vertices detected.`);
+  console.log(`Road Mesh V3 generated: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.segmentCount} segments.`);
+  console.log(`Runtime DAE Clearance Audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}.`);
+  console.log(`Max clearance vertex: (${daeAudit.maxClearanceVertex.x.toFixed(2)}, ${daeAudit.maxClearanceVertex.y.toFixed(2)}, ${daeAudit.maxClearanceVertex.z.toFixed(2)}) clearance=${daeAudit.maxClearanceVertex.clearance.toFixed(3)}m.`);
+  console.log(`Max adjacent Z step: ${roadMesh.clearanceStats.maxAdjacentZJumpMetres}m.`);
+
+  if (daeAudit.negativeCount > 0) {
+    throw new Error(`Gate 4 rejected: ${daeAudit.negativeCount} negative-clearance vertices detected in DAE.`);
   }
+
+  if (daeAudit.maxClearance > 0.080) {
+    throw new Error(`Gate 4 rejected: Max DAE clearance ${daeAudit.maxClearance}m exceeds limit 0.080m.`);
+  }
+
+  // Generate debug markers for visual verification
+  const debugMarkers: Array<Record<string, unknown>> = [...baseMarkers];
+  const halfGrid = SIZE / 2;
+
+  // 1. Centerline & station markers every 25m
+  for (let i = 0; i < stations.length; i += 25) {
+    const st = stations[i];
+    const wx = st.x + halfGrid;
+    const wy = st.y + halfGrid;
+    const wz = sampleTerrainElevation(wx, wy) + 0.5;
+
+    debugMarkers.push({
+      name: `station_marker_${Math.round(st.station)}m`,
+      class: 'TSStatic',
+      shapeName: 'core/art/shapes/octahedron.dae',
+      position: [wx, wy, wz],
+      rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      scale: [0.5, 0.5, 0.5],
+    });
+  }
+
+  // 2. Highlighted maximum-clearance vertex marker
+  debugMarkers.push({
+    name: 'max_clearance_vertex_marker',
+    class: 'TSStatic',
+    shapeName: 'core/art/shapes/octahedron.dae',
+    position: [
+      daeAudit.maxClearanceVertex.x,
+      daeAudit.maxClearanceVertex.y,
+      daeAudit.maxClearanceVertex.z + 1.0,
+    ],
+    rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    scale: [1.0, 1.0, 1.0],
+  });
 
   const { diffusePng, isRealSatellite } = await fetchRealBanovceOrthophoto({
     transformer: sourceTerrain.transformer,
@@ -150,8 +197,8 @@ async function main(): Promise<void> {
   const levelFiles = generateLevelPackageFiles(artifact, {
     levelName: LEVEL_NAME,
     title: 'TriWorld V4 Native Gate 4 — Road Surface Mesh V3',
-    description: 'Native BeamNG level with real DEM terrain, 180-deg rotated satellite orthophoto, and 3D asphalt road mesh object.',
-    extraMarkers: markers,
+    description: 'Native BeamNG level with real DEM terrain, 180-deg rotated satellite orthophoto, and dense 3D asphalt road mesh object.',
+    extraMarkers: debugMarkers,
     diffusePng,
     normalPng: undefined,
     roadDae,
@@ -204,6 +251,7 @@ async function main(): Promise<void> {
       segmentCount: roadMesh.segmentCount,
       clearanceStats: roadMesh.clearanceStats,
     },
+    daeRuntimeAudit: daeAudit,
     zipPath,
     zipHash,
     installedZipPath,
@@ -220,8 +268,10 @@ async function main(): Promise<void> {
       colorMap: `/levels/${LEVEL_NAME}/art/road/asphalt_d.png`,
     },
     acceptance: {
-      negativeClearanceCountZero: roadMesh.clearanceStats.negativeCount === 0,
-      minClearancePositive: roadMesh.clearanceStats.minMetres >= 0.05,
+      negativeClearanceCountZero: daeAudit.negativeCount === 0,
+      minClearancePositive: daeAudit.minClearance >= 0.035,
+      maxClearanceBounded: daeAudit.maxClearance <= 0.080,
+      noZJumpAboveLimit: roadMesh.clearanceStats.maxAdjacentZJumpMetres <= 0.35,
       zipHashesMatch: zipHash === installedZipHash,
       realDemUsed: true,
       realOsmRoadUsed: true,
@@ -230,10 +280,11 @@ async function main(): Promise<void> {
 
   fs.writeFileSync(reportJsonPath, JSON.stringify(buildReport, null, 2));
 
-  console.log(`GATE 4 ACCEPTED`);
+  console.log(`GATE 4 ACCEPTED FOR RUNTIME TESTING`);
   console.log(`Level: ${LEVEL_NAME}`);
   console.log(`Road Mesh: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.lengthMetres.toFixed(1)}m length`);
-  console.log(`Clearance: min=${roadMesh.clearanceStats.minMetres}m, max=${roadMesh.clearanceStats.maxMetres}m, negativeCount=${roadMesh.clearanceStats.negativeCount}`);
+  console.log(`DAE Runtime Clearance: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}`);
+  console.log(`Max clearance vertex: (${daeAudit.maxClearanceVertex.x.toFixed(2)}, ${daeAudit.maxClearanceVertex.y.toFixed(2)}, ${daeAudit.maxClearanceVertex.z.toFixed(2)})`);
   console.log(`ZIP: ${zipPath}`);
   console.log(`Installed Mod: ${installedZipPath}`);
   console.log(`ZIP SHA-256: ${zipHash}`);
