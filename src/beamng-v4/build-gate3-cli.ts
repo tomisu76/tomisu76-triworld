@@ -17,7 +17,7 @@ import { buildBeamNgZipPackage } from './zip-builder';
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate3_osm';
+const LEVEL_NAME = 'triworld_v4_gate3_osm_materialfix1';
 const HEIGHT_COMPARISON_EPSILON_METRES = 0.01;
 const MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES = 0.05;
 
