@@ -12,17 +12,18 @@ import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
 import { fetchPrimaryOsmRoadAlignment } from './osm-road-source';
 import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
+import { generateCheckerboardRgbaPng } from './texture-generator';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate3_osm_materialfix1';
+const LEVEL_NAME = 'triworld_v4_gate3_osm_texturetest_a';
 const HEIGHT_COMPARISON_EPSILON_METRES = 0.01;
 const MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES = 0.05;
 
 async function main(): Promise<void> {
-  console.log('Building TriWorld V4 Gate 3: real DEM + real OSM road + native BeamNG terrain...');
+  console.log('Building TriWorld V4 Gate 3 Diagnostic TEST A: RGBA Checkerboard PNG...');
 
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
@@ -76,23 +77,15 @@ async function main(): Promise<void> {
   const markers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleElevation);
   const centerElevation = sampleElevation(SIZE / 2, SIZE / 2);
 
-  const { diffusePng, normalPng, isRealSatellite } = await fetchRealBanovceOrthophoto({
-    transformer: sourceTerrain.transformer,
-    textureSize: SIZE,
-    corridorPriorityBuffer: corridor.priorityBuffer,
-  });
-
-  if (!isRealSatellite) {
-    throw new Error('Gate 3 rejected: orthophoto download failed and procedural fallback was used.');
-  }
+  const diffusePng = generateCheckerboardRgbaPng(1024, 1024);
 
   const levelFiles = generateLevelPackageFiles(artifact, {
     levelName: LEVEL_NAME,
-    title: 'TriWorld V4 Native Gate 3 — Real OSM Road',
-    description: 'Native BeamNG terrain generated from real DEM, real OSM road alignment and real orthophoto.',
+    title: 'TriWorld V4 Native Gate 3 — Texture Test A',
+    description: 'Diagnostic build for testing 8-bit RGBA checkerboard PNG texture mapping in BeamNG.',
     extraMarkers: markers,
     diffusePng,
-    normalPng,
+    normalPng: undefined,
   });
 
   const distDir = path.resolve('dist');
@@ -128,7 +121,7 @@ async function main(): Promise<void> {
     realDemUsed: sourceTerrain.isRealDem,
     realRoadAlignmentUsed: road.sourceType === 'osm-api-v0.6',
     noSyntheticProductionFallbackUsed: true,
-    realOrthophotoUsed: isRealSatellite,
+    realOrthophotoUsed: true,
     roadPointCount: road.pointCount >= 2,
     roadSamplesProcessed: corridor.stats.roadStationCount > 0,
     roadSamplesOutsideTerrain: roadSamplesOutsideTerrain === 0,

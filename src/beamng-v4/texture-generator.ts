@@ -1,4 +1,5 @@
 import zlib from 'node:zlib';
+import { PNG } from 'pngjs';
 
 function createCrcTable(): Uint32Array {
   const cTable = new Uint32Array(256);
@@ -98,4 +99,36 @@ export function generateCustomPng(
 
 export function generateSolidPng(width: number, height: number, r: number, g: number, b: number): Uint8Array {
   return generateCustomPng(width, height, () => [r, g, b]);
+}
+
+export function generateCheckerboardRgbaPng(width: number = 1024, height: number = 1024): Uint8Array {
+  const png = new PNG({ width, height, colorType: 6, bitDepth: 8, inputHasAlpha: true });
+  const halfW = Math.floor(width / 2);
+  const halfH = Math.floor(height / 2);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      let r = 255, g = 255, b = 255;
+      if (x < halfW && y < halfH) {
+        // Red quadrant
+        r = 255; g = 0; b = 0;
+      } else if (x >= halfW && y < halfH) {
+        // Green quadrant
+        r = 0; g = 255; b = 0;
+      } else if (x < halfW && y >= halfH) {
+        // Blue quadrant
+        r = 0; g = 0; b = 255;
+      } else {
+        // White quadrant
+        r = 255; g = 255; b = 255;
+      }
+      png.data[idx + 0] = r;
+      png.data[idx + 1] = g;
+      png.data[idx + 2] = b;
+      png.data[idx + 3] = 255;
+    }
+  }
+
+  return new Uint8Array(PNG.sync.write(png));
 }

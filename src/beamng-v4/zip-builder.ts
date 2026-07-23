@@ -28,8 +28,11 @@ export async function buildBeamNgZipPackage(
     { zipPath: `levels/${levelName}/art/terrains/terrain.terrain.json`, content: files.terrainJson },
     { zipPath: `levels/${levelName}/art/terrains/main.materials.json`, content: files.materialsJson },
     { zipPath: `levels/${levelName}/art/terrains/ground_d.png`, content: files.diffusePng },
-    { zipPath: `levels/${levelName}/art/terrains/ground_n.png`, content: files.normalPng },
   ];
+
+  if (files.normalPng && files.normalPng.length > 0) {
+    entries.push({ zipPath: `levels/${levelName}/art/terrains/ground_n.png`, content: files.normalPng });
+  }
 
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
 

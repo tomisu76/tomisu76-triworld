@@ -32,7 +32,7 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 2 (Ortofoto & Terrain Materials)',
     expect(materialsObj.triworld_v4_ground.class).toBe('TerrainMaterial');
     expect(materialsObj.triworld_v4_ground.diffuseMap).toBe('/levels/triworld_v4/art/terrains/ground_d.png');
     expect(materialsObj.triworld_v4_ground.normalMap).toBe('/levels/triworld_v4/art/terrains/ground_n.png');
-    expect(materialsObj.triworld_v4_ground.detailSize).toBe(1024);
+    expect(materialsObj.triworld_v4_ground.diffuseSize).toBe(1024);
   });
 
   test('3. Deterministic Procedural Output', () => {

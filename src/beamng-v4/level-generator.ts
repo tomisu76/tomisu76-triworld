@@ -17,7 +17,7 @@ export interface LevelPackageFiles {
   terrainJson: string;
   materialsJson: string;
   diffusePng: Uint8Array;
-  normalPng: Uint8Array;
+  normalPng?: Uint8Array;
 }
 
 export function generateLevelPackageFiles(
@@ -135,23 +135,21 @@ export function generateLevelPackageFiles(
     materials: [`${levelName}_ground`],
   };
 
+  const groundMat: Record<string, unknown> = {
+    class: "TerrainMaterial",
+    internalName: `${levelName}_ground`,
+    diffuseMap: `/levels/${levelName}/art/terrains/ground_d.png`,
+    diffuseSize: 1024,
+    groundmodelName: "GRASS",
+    annotation: "NATURE",
+  };
+
+  if (options.normalPng !== null && options.normalPng !== undefined) {
+    groundMat.normalMap = `/levels/${levelName}/art/terrains/ground_n.png`;
+  }
+
   const materialsJsonObj = {
-    [`${levelName}_ground`]: {
-      name: `${levelName}_ground`,
-      class: "TerrainMaterial",
-      internalName: `${levelName}_ground`,
-      baseColorBaseTex: `/levels/${levelName}/art/terrains/ground_d.png`,
-      baseColorBaseTexSize: size,
-      diffuseMap: `/levels/${levelName}/art/terrains/ground_d.png`,
-      diffuseSize: size,
-      macroMap: `/levels/${levelName}/art/terrains/ground_d.png`,
-      macroSize: size,
-      normalMap: `/levels/${levelName}/art/terrains/ground_n.png`,
-      normalBaseTex: `/levels/${levelName}/art/terrains/ground_n.png`,
-      normalBaseTexSize: size,
-      detailSize: size,
-      groundmodelName: "GRASS",
-    },
+    [`${levelName}_ground`]: groundMat,
   };
 
   const diffusePng = options.diffusePng ?? generateSolidPng(16, 16, 40, 120, 50); // Soft green grass

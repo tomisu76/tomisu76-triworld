@@ -6,6 +6,8 @@ import { designVerticalProfileV3, GATE3_PRODUCTION_PROFILE_CONFIG } from '../pip
 import { TerrainGridV3 } from '../pipeline-v3/terrain/TerrainGridV3';
 import { SumoPlanStation } from '../pipeline-v3/sumo/SumoGeometryV3';
 import { buildBanovceRealWorldTerrainAsync } from './gis-terrain';
+import { generateLevelPackageFiles } from './level-generator';
+import { generateCheckerboardRgbaPng } from './texture-generator';
 import {
   applyCoupledRoadTerrainCorridor,
   SYNTHETIC_VALIDATION_ROAD_SHAPE_CENTERED,
@@ -109,5 +111,27 @@ describe('Gate 3 Strict Verification Requirements', () => {
 
     expect(source).toContain('noSyntheticProductionFallbackUsed: true');
     expect(source).not.toContain('syntheticProductionFallbackUsed: false');
+  });
+
+  it('7. TEST A produces 8-bit RGBA checkerboard PNG and classic v1 TerrainMaterial without normalMap or v1.5 fields', () => {
+    const levelName = 'triworld_v4_gate3_osm_texturetest_a';
+    const diffusePng = generateCheckerboardRgbaPng(1024, 1024);
+    const levelFiles = generateLevelPackageFiles(
+      { size: 1024, squareSize: 1.0, maxHeight: 500.0 },
+      { levelName, diffusePng, normalPng: undefined },
+    );
+
+    expect(levelFiles.itemsLevelJson).not.toContain('materialTextureSet');
+
+    const materials = JSON.parse(levelFiles.materialsJson);
+    const groundMaterial = materials[`${levelName}_ground`];
+
+    expect(groundMaterial).toBeDefined();
+    expect(groundMaterial.class).toBe('TerrainMaterial');
+    expect(groundMaterial.diffuseMap).toBe(`/levels/${levelName}/art/terrains/ground_d.png`);
+    expect(groundMaterial.diffuseSize).toBe(1024);
+    expect(groundMaterial.normalMap).toBeUndefined();
+    expect(groundMaterial.macroMap).toBeUndefined();
+    expect(groundMaterial.baseColorBaseTex).toBeUndefined();
   });
 });
