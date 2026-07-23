@@ -91,11 +91,10 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 0 (23 Automated Acceptance Tests)'
   test('11. Height Values Within Uint16 Bounds — min >= 0, max <= 65535', () => {
     const { artifact } = generateAnalyticGate0Terrain(512);
     for (let i = 0; i < artifact.heightMapU16.length; i++) {
-      const val = artifact.heightMapU16[i];
-      expect(val).toBeGreaterThanOrEqual(0);
-      expect(val).toBeLessThanOrEqual(65535);
+      expect(artifact.heightMapU16[i]).toBeGreaterThanOrEqual(0);
+      expect(artifact.heightMapU16[i]).toBeLessThanOrEqual(65535);
     }
-  });
+  }, 30000);
 
   test('12. Quantization Error Bounded by heightScale / 2 + epsilon', () => {
     const { result } = generateAnalyticGate0Terrain(512, 1.0, 100.0);

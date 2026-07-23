@@ -42,7 +42,11 @@ function makePngChunk(type: string, data: Uint8Array): Uint8Array {
   return chunk;
 }
 
-export function generateSolidPng(width: number, height: number, r: number, g: number, b: number): Uint8Array {
+export function generateCustomPng(
+  width: number,
+  height: number,
+  pixelFn: (x: number, y: number) => [number, number, number]
+): Uint8Array {
   const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
   // IHDR chunk
@@ -59,17 +63,19 @@ export function generateSolidPng(width: number, height: number, r: number, g: nu
   const ihdrChunk = makePngChunk('IHDR', ihdr);
 
   // IDAT chunk
-  const rawRow = new Uint8Array(1 + width * 3);
-  rawRow[0] = 0; // Filter type None
-  for (let x = 0; x < width; x++) {
-    rawRow[1 + x * 3 + 0] = r;
-    rawRow[1 + x * 3 + 1] = g;
-    rawRow[1 + x * 3 + 2] = b;
-  }
+  const rowStride = 1 + width * 3;
+  const rawImage = new Uint8Array(height * rowStride);
 
-  const rawImage = new Uint8Array(height * rawRow.length);
   for (let y = 0; y < height; y++) {
-    rawImage.set(rawRow, y * rawRow.length);
+    const rowOffset = y * rowStride;
+    rawImage[rowOffset] = 0; // Filter type None
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = pixelFn(x, y);
+      const pixelOffset = rowOffset + 1 + x * 3;
+      rawImage[pixelOffset + 0] = Math.max(0, Math.min(255, Math.round(r)));
+      rawImage[pixelOffset + 1] = Math.max(0, Math.min(255, Math.round(g)));
+      rawImage[pixelOffset + 2] = Math.max(0, Math.min(255, Math.round(b)));
+    }
   }
 
   const compressed = zlib.deflateSync(rawImage);
@@ -88,4 +94,8 @@ export function generateSolidPng(width: number, height: number, r: number, g: nu
   png.set(iendChunk, offset); offset += iendChunk.length;
 
   return png;
+}
+
+export function generateSolidPng(width: number, height: number, r: number, g: number, b: number): Uint8Array {
+  return generateCustomPng(width, height, () => [r, g, b]);
 }

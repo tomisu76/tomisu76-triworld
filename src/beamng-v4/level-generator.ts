@@ -6,6 +6,8 @@ export interface LevelPackageOptions {
   title?: string;
   description?: string;
   extraMarkers?: LevelMarker[];
+  diffusePng?: Uint8Array;
+  normalPng?: Uint8Array;
 }
 
 export interface LevelPackageFiles {
@@ -139,13 +141,13 @@ export function generateLevelPackageFiles(
       diffuseMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
       normalMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_n.png",
       detailMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
-      detailSize: 4,
+      detailSize: options.diffusePng ? size : 4,
       groundmodelName: "GRASS",
     },
   };
 
-  const diffusePng = generateSolidPng(16, 16, 40, 120, 50); // Soft green grass
-  const normalPng = generateSolidPng(16, 16, 128, 128, 255); // Flat normal map (Z up)
+  const diffusePng = options.diffusePng ?? generateSolidPng(16, 16, 40, 120, 50); // Soft green grass
+  const normalPng = options.normalPng ?? generateSolidPng(16, 16, 128, 128, 255); // Flat normal map (Z up)
 
   return {
     infoJson: JSON.stringify(infoObj, null, 2),
