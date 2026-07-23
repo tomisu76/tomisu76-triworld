@@ -41,6 +41,7 @@ export async function buildBeamNgZipPackage(
   for (const entry of entries) {
     zip.file(entry.zipPath, entry.content, {
       date: new Date('2026-07-23T12:00:00Z'),
+      createFolders: false,
     });
     packagedFileHashes[entry.zipPath] = sha256(entry.content);
   }
