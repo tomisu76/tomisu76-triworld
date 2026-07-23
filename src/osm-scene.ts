@@ -6,12 +6,12 @@ const ANCHOR = {
   height: 0,
 };
 
-const HALF_EXTENT_METRES = 500;
+const HALF_EXTENT_METRES = 1000;
 const BBOX = [
-  18.33663427170421,
-  48.72825915970341,
-  18.35025387647229,
-  48.737242271453326,
+  18.329824469320165,
+  48.723767603828456,
+  18.357063678856335,
+  48.74173382732828,
 ] as const;
 
 const EXCLUDED_HIGHWAYS = new Set([
@@ -158,7 +158,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
   };
 
   const scene: CanonicalScene = {
-    id: 'triworld-osm-skacany-v01',
+    id: 'triworld-osm-skacany-2km-v01',
     schemaVersion: '0.1.0',
     coordinateSystem: {
       handedness: 'right',
@@ -191,7 +191,7 @@ export async function buildOsmScene(): Promise<OsmSceneResult> {
 }
 
 function buildTerrainMesh(): CanonicalMesh {
-  const size = 81;
+  const size = 161;
   const step = (HALF_EXTENT_METRES * 2) / (size - 1);
   const positions: number[] = [];
   const indices: number[] = [];
@@ -215,7 +215,7 @@ function buildTerrainMesh(): CanonicalMesh {
   }
 
   return {
-    id: 'terrain-procedural-1km',
+    id: 'terrain-procedural-2km',
     role: 'terrain',
     materialId: 'terrain-preview',
     positions,
