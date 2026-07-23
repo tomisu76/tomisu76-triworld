@@ -78,10 +78,12 @@ export function enforceClosedGradeConstraint(
 ): void {
   if (stationsWithClosure.length < 4) throw new Error('Closed road requires at least three stations plus closure');
   const stations = stationsWithClosure.slice(0, -1);
-  const tolerance = 1e-10;
+  const targetGrade = Math.max(0, maximumGrade - 0.0001);
+  const numericalToleranceMetres = 1e-7;
 
-  // Alternating projections onto all cyclic Lipschitz constraints. Pairwise
-  // corrections preserve the local mean and converge deterministically.
+  // Alternating projections onto all cyclic Lipschitz constraints. A small
+  // design reserve absorbs floating-point residuals; acceptance is decided by
+  // the measured final grade rather than an arbitrary absolute residual.
   for (let pass = 0; pass < 20_000; pass++) {
     let maximumViolation = 0;
     for (let index = 0; index < stations.length; index++) {
@@ -89,20 +91,17 @@ export function enforceClosedGradeConstraint(
       const a = stations[index];
       const b = stations[nextIndex];
       const run = Math.max(0.01, Math.hypot(b.x - a.x, b.y - a.y));
-      const limit = maximumGrade * run;
+      const limit = targetGrade * run;
       const delta = b.z - a.z;
       const violation = Math.abs(delta) - limit;
-      if (violation <= tolerance) continue;
+      if (violation <= numericalToleranceMetres) continue;
       const direction = Math.sign(delta) || 1;
       const correction = violation / 2;
       a.z += direction * correction;
       b.z -= direction * correction;
       maximumViolation = Math.max(maximumViolation, violation);
     }
-    if (maximumViolation <= tolerance) break;
-    if (pass === 19_999) {
-      throw new Error(`Closed profile grade solver did not converge; residual ${maximumViolation}`);
-    }
+    if (maximumViolation <= numericalToleranceMetres) break;
   }
 
   const first = stations[0];
@@ -111,6 +110,13 @@ export function enforceClosedGradeConstraint(
     ...first,
     station: closingDistance,
   };
+
+  const measuredMaximumGrade = calculateMaximumGrade(stationsWithClosure);
+  if (measuredMaximumGrade > maximumGrade + 1e-9) {
+    throw new Error(
+      `Closed profile exceeds grade ceiling: ${measuredMaximumGrade} > ${maximumGrade}`,
+    );
+  }
 }
 
 function reconformTerrain(
