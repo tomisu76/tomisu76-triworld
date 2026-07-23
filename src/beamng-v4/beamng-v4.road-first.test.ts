@@ -8,8 +8,10 @@ import { buildValidatedMountainLoopTerrain } from './road-first-finalizer';
 import { MOUNTAIN_LOOP_CENTER_WGS84 } from './road-first-terrain';
 import { buildBeamNgZipPackage } from './zip-builder';
 
+const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+
 describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
-  test('1. closed road has bounded grade, bank and a stable BeamNG DecalRoad', () => {
+  test('1. closed road has bounded grade, bank and explicit BeamNG navigation metadata', () => {
     const result = buildValidatedMountainLoopTerrain({
       size: 256,
       squareSize: 1,
@@ -17,10 +19,17 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
       stationSpacing: 3,
       maximumGrade: 0.10,
     });
+    const road = result.road as unknown as Record<string, unknown>;
 
     expect(result.artifact.version).toBe(9);
     expect(result.road.class).toBe('DecalRoad');
     expect(result.road.drivability).toBe(1);
+    expect(result.road.autoLanes).toBe(false);
+    expect(road.improvedSpline).toBe(true);
+    expect(road.useSubdivisions).toBe(true);
+    expect(road.lanesLeft).toBe(1);
+    expect(road.lanesRight).toBe(1);
+    expect(road.hiddenInNavi).toBe(false);
     expect(result.road.nodes.length).toBeGreaterThan(50);
     expect(result.road.nodes[0]).toEqual(result.road.nodes[result.road.nodes.length - 1]);
     expect(result.stats.roadLengthMetres).toBeGreaterThan(550);
@@ -41,7 +50,31 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     }
   });
 
-  test('3. generated items and materials contain a valid AI DecalRoad and local asphalt assets', () => {
+  test('3. daylight transition has no vertical one-metre walls beside the road', () => {
+    const result = buildValidatedMountainLoopTerrain({
+      size: 256,
+      squareSize: 1,
+      stationSpacing: 3,
+      minimumBlendWidth: 22,
+      maximumBlendWidth: 70,
+    });
+    for (let index = 10; index < result.roadStations.length - 1; index += 31) {
+      const station = result.roadStations[index];
+      for (const side of [-1, 1]) {
+        let previous = result.sampleElevation(station.x, station.y);
+        for (let offset = 1; offset <= 60; offset++) {
+          const current = result.sampleElevation(
+            station.x + station.normalX * offset * side,
+            station.y + station.normalY * offset * side,
+          );
+          expect(Math.abs(current - previous)).toBeLessThan(2.5);
+          previous = current;
+        }
+      }
+    }
+  });
+
+  test('4. generated items and materials use natural multi-scale terrain and readable asphalt assets', () => {
     const result = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     const files = generateLevelPackageFiles(result.artifact, {
       extraObjects: [result.road as unknown as Record<string, unknown>],
@@ -49,16 +82,26 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     const objects = files.itemsLevelJson.split('\n').map((line) => JSON.parse(line));
     const road = objects.find((object) => object.class === 'DecalRoad');
     const materials = JSON.parse(files.materialsJson);
+    const info = JSON.parse(files.infoJson);
 
     expect(road.name).toBe('triworld_mountain_loop');
     expect(road.material).toBe('triworld_v4_asphalt');
     expect(road.nodes.length).toBe(result.road.nodes.length);
+    expect(materials.triworld_v4_ground.diffuseSize).toBe(48);
+    expect(materials.triworld_v4_ground.detailSize).toBe(4);
+    expect(materials.triworld_v4_ground.macroSize).toBe(220);
     expect(materials.triworld_v4_asphalt.class).toBe('Material');
     expect(materials.triworld_v4_asphalt.baseColorMap[0]).toContain('/levels/triworld_v4/art/roads/');
-    expect(files.roadDiffusePng.subarray(0, 8)).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(info.roadRules.rightHandDrive).toBe(true);
+    expect(files.diffusePng.subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(files.terrainMacroPng.subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(files.terrainDetailPng.subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(files.roadDiffusePng.subarray(0, 8)).toEqual(PNG_SIGNATURE);
+    expect(files.diffusePng.length).toBeGreaterThan(10_000);
+    expect(files.roadDiffusePng.length).toBeGreaterThan(10_000);
   });
 
-  test('4. deterministic road-first builds produce byte-identical native terrain and nodes', () => {
+  test('5. deterministic road-first builds produce byte-identical native terrain and nodes', () => {
     const first = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     const second = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     expect(first.artifact.heightMapU16).toEqual(second.artifact.heightMapU16);
@@ -66,7 +109,7 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     expect(first.stats).toEqual(second.stats);
   });
 
-  test('5. ZIP contains terrain collision, DecalRoad scene data and asphalt textures', async () => {
+  test('6. ZIP contains collision terrain, AI DecalRoad and all natural surface textures', async () => {
     const result = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     const files = generateLevelPackageFiles(result.artifact, {
       title: 'TriWorld V4 Road-First Validation',
@@ -80,12 +123,16 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     const zip = await JSZip.loadAsync(fs.readFileSync(zipPath));
     expect(zip.file('levels/triworld_v4/art/terrains/terrain.ter')).not.toBeNull();
     expect(zip.file('levels/triworld_v4/main/items.level.json')).not.toBeNull();
+    expect(zip.file('levels/triworld_v4/art/terrains/triworld_v4_ground_macro.png')).not.toBeNull();
+    expect(zip.file('levels/triworld_v4/art/terrains/triworld_v4_ground_detail.png')).not.toBeNull();
     expect(zip.file('levels/triworld_v4/art/roads/triworld_v4_asphalt.color.png')).not.toBeNull();
     expect(zip.file('levels/triworld_v4/art/roads/triworld_v4_asphalt.normal.png')).not.toBeNull();
 
     const items = await zip.file('levels/triworld_v4/main/items.level.json')!.async('string');
     expect(items).toContain('"class":"DecalRoad"');
     expect(items).toContain('"drivability":1');
+    expect(items).toContain('"improvedSpline":true');
+    expect(items).toContain('"useSubdivisions":true');
     fs.rmSync(output, { recursive: true, force: true });
   });
 });
