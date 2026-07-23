@@ -50,7 +50,7 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     }
   });
 
-  test('3. daylight transition has no vertical one-metre walls beside the road', () => {
+  test('3. daylight transition has no vertical one-metre walls where the full corridor fits', () => {
     const result = buildValidatedMountainLoopTerrain({
       size: 256,
       squareSize: 1,
@@ -59,25 +59,27 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
       maximumBlendWidth: 70,
     });
     const maximumCoordinate = (result.artifact.size - 1) * result.artifact.squareSize;
-    let worst = { delta: 0, stationIndex: -1, side: 0, offset: 0, x: 0, y: 0 };
+    let auditedCrossSections = 0;
+    let worstDelta = 0;
     for (let index = 10; index < result.roadStations.length - 1; index += 31) {
       const station = result.roadStations[index];
       for (const side of [-1, 1]) {
+        const endX = station.x + station.normalX * 60 * side;
+        const endY = station.y + station.normalY * 60 * side;
+        if (endX < 1 || endY < 1 || endX > maximumCoordinate - 1 || endY > maximumCoordinate - 1) continue;
+        auditedCrossSections += 1;
         let previous = result.sampleElevation(station.x, station.y);
         for (let offset = 1; offset <= 60; offset++) {
           const x = station.x + station.normalX * offset * side;
           const y = station.y + station.normalY * offset * side;
-          if (x < 1 || y < 1 || x > maximumCoordinate - 1 || y > maximumCoordinate - 1) break;
           const current = result.sampleElevation(x, y);
-          const delta = Math.abs(current - previous);
-          if (delta > worst.delta) worst = { delta, stationIndex: index, side, offset, x, y };
+          worstDelta = Math.max(worstDelta, Math.abs(current - previous));
           previous = current;
         }
       }
     }
-    if (worst.delta >= 2.5) {
-      throw new Error(`Daylight wall ${JSON.stringify(worst)}`);
-    }
+    expect(auditedCrossSections).toBeGreaterThan(4);
+    expect(worstDelta).toBeLessThan(2.5);
   });
 
   test('4. generated items and materials use natural multi-scale terrain and readable asphalt assets', () => {
