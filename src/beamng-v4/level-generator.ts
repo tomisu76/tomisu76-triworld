@@ -124,7 +124,7 @@ export function generateLevelPackageFiles(
 
   const terrainJsonObj = {
     version: 9,
-    datafile: "terrain.ter",
+    datafile: "/levels/triworld_v4/art/terrains/terrain.ter",
     size,
     heightMapSize: size,
     heightMapItemSize: 2,
@@ -138,10 +138,16 @@ export function generateLevelPackageFiles(
       name: "triworld_v4_ground",
       class: "TerrainMaterial",
       internalName: "triworld_v4_ground",
+      baseColorBaseTex: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      baseColorBaseTexSize: size,
       diffuseMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      diffuseSize: size,
+      macroMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      macroSize: size,
       normalMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_n.png",
-      detailMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
-      detailSize: options.diffusePng ? size : 4,
+      normalBaseTex: "/levels/triworld_v4/art/terrains/triworld_v4_ground_n.png",
+      normalBaseTexSize: size,
+      detailSize: size,
       groundmodelName: "GRASS",
     },
   };

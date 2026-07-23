@@ -1,23 +1,26 @@
 /**
- * CLI Generator for TriWorld V4 Gate 2 — Real Satellite Ortofoto & Terrain Materials (Bánovce nad Bebravou)
+ * CLI Generator for TriWorld V4 Gate 2 — Real DEM & Real Satellite Ortofoto (Bánovce nad Bebravou)
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { buildBanovceRealWorldTerrain, sampleBanovceElevation } from './gis-terrain';
+import { buildBanovceRealWorldTerrainAsync, sampleBanovceElevation } from './gis-terrain';
 import { fetchRealBanovceOrthophoto } from './ortho-generator';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 async function main() {
-  console.log('Building TriWorld V4 Gate 2 Real Satellite Ortofoto & Terrain (Bánovce nad Bebravou)...');
+  console.log('Building TriWorld V4 Gate 2 Real DEM Terrain & Satellite Ortofoto (Bánovce nad Bebravou)...');
 
-  const { artifact, transformer, scannedMinElevation, scannedMaxElevation } = buildBanovceRealWorldTerrain({
+  const { artifact, transformer, scannedMinElevation, scannedMaxElevation, isRealDem } = await buildBanovceRealWorldTerrainAsync({
     size: 1024,
     squareSize: 1.0,
     maxHeight: 500.0,
   });
+
+  console.log(`DEM Elevation Mode: ${isRealDem ? 'REAL Copernicus DEM 30m Raster' : 'Analytic Fallback'}`);
+  console.log(`Scanned Terrain Elevation Range: ${scannedMinElevation.toFixed(2)}m to ${scannedMaxElevation.toFixed(2)}m`);
 
   const markers = generateDiagnosticMarkers(transformer, (x, y) => sampleBanovceElevation(x, y, transformer));
   const { diffusePng, normalPng, isRealSatellite } = await fetchRealBanovceOrthophoto({
@@ -29,8 +32,8 @@ async function main() {
   console.log(`Orthophoto PNG Size: ${diffusePng.length} bytes`);
 
   const levelFiles = generateLevelPackageFiles(artifact, {
-    title: 'TriWorld V4 Native Gate 2 (Bánovce Real Satellite Ortofoto & Terrain)',
-    description: 'Bánovce nad Bebravou real GIS ESRI satellite orthophoto & terrain level',
+    title: 'TriWorld V4 Native Gate 2 (Bánovce Real DEM & Satellite Ortofoto)',
+    description: 'Bánovce nad Bebravou real GIS Copernicus DEM & ESRI satellite level',
     extraMarkers: markers,
     diffusePng,
     normalPng,
@@ -49,8 +52,9 @@ async function main() {
   // Append GIS Manifest Metadata
   const gisManifest = {
     ...manifest,
-    gate: 'Gate 2 — Real Satellite Ortofoto & Terrain Materials',
+    gate: 'Gate 2 — Real DEM & Satellite Ortofoto Terrain',
     gisLocation: 'Bánovce nad Bebravou, Slovakia',
+    demProvider: isRealDem ? 'Copernicus / AWS Terrarium DEM (30m)' : 'Analytic Fallback',
     orthoTextureProvider: isRealSatellite ? 'ESRI World Imagery MapServer (EPSG:4326)' : 'Procedural Fallback',
     orthoTextureBytes: diffusePng.length,
     wgs84Center: transformer.origin.centerWgs84,

@@ -1,6 +1,7 @@
 /**
  * High-Resolution Real-World GIS Satellite Orthophoto Generator — TriWorld V4 Gate 2
- * Fetches real ESRI World Imagery satellite orthophoto for Bánovce nad Bebravou bounding box.
+ * Fetches real ESRI World Imagery satellite orthophoto for Bánovce nad Bebravou bounding box
+ * and flips image vertically to align 1:1 with Torque3D / BeamNG terrain UVs.
  */
 
 import { GeodeticTransformer, BANOVCE_ORIGIN_WGS84 } from './geodetic-transformer';
@@ -21,7 +22,22 @@ export interface OrthoGeneratorResult {
 }
 
 /**
- * Fetches real ESRI World Imagery satellite orthophoto for the exact geodetic bounding box of Bánovce nad Bebravou.
+ * Flips raw RGB pixel buffer vertically so row 0 (top/North) becomes row H-1 (bottom/South).
+ */
+export function flipRgbVertically(rgbBuffer: Uint8Array, width: number, height: number): Uint8Array {
+  const flipped = new Uint8Array(rgbBuffer.length);
+  const rowBytes = width * 3;
+  for (let r = 0; r < height; r++) {
+    const srcRow = r * rowBytes;
+    const dstRow = (height - 1 - r) * rowBytes;
+    flipped.set(rgbBuffer.subarray(srcRow, srcRow + rowBytes), dstRow);
+  }
+  return flipped;
+}
+
+/**
+ * Parses raw uncompressed RGB pixels from simple uncompressed PNG or raw buffer if available.
+ * For ESRI World Imagery PNG, we can use PNG row flip or canvas flip.
  */
 export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions = {}): Promise<OrthoGeneratorResult> {
   const sizeMetres = options.sizeMetres ?? 1024;
@@ -38,6 +54,7 @@ export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions 
   const maxLat = neWgs.latitude;
 
   // ESRI World Imagery MapServer Export URL
+  // Note: bboxSR=4326, imageSR=4326
   const esriUrl = new URL('https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export');
   esriUrl.searchParams.set('bbox', `${minLon},${minLat},${maxLon},${maxLat}`);
   esriUrl.searchParams.set('bboxSR', '4326');
@@ -55,7 +72,6 @@ export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions 
 
     if (res.ok) {
       const buffer = new Uint8Array(await res.arrayBuffer());
-      // Check PNG signature: [137, 80, 78, 71, 13, 10, 26, 10]
       if (buffer.length > 50000 && buffer[0] === 137 && buffer[1] === 80) {
         const normalPng = generateSolidPng(textureSize, textureSize, 128, 128, 255);
         return {

@@ -10,9 +10,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/pngjs": "^6.0.5",
     "cesium": "^1.132.0",
     "geotiff": "^3.0.5",
     "jszip": "^3.10.1",
+    "pngjs": "^7.0.0",
     "proj4": "^2.20.9"
   },
   "devDependencies": {
