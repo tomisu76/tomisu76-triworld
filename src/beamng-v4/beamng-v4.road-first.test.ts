@@ -17,6 +17,7 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
       squareSize: 1,
       centerWgs84: MOUNTAIN_LOOP_CENTER_WGS84,
       stationSpacing: 3,
+      maximumGrade: 0.075,
     });
 
     expect(result.artifact.version).toBe(9);
