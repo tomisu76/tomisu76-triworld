@@ -4,7 +4,7 @@ export interface BeamNGTerrainArtifact {
   squareSize: number;
   maxHeight: number;
   heightScale: number;
-  terrainPosition: [number, number, number];
+  terrainPosition?: [number, number, number];
   heightMapU16: Uint16Array;
   layerMapU8: Uint8Array;
   materialNames: readonly string[];
