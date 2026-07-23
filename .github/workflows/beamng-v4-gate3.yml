@@ -18,7 +18,7 @@ permissions:
 jobs:
   gate3:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,26 +32,51 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check and build application
-        run: npm run build
-
-      - name: Run Gate 3 acceptance tests
-        run: npm run test:gate3
-
-      - name: Build BeamNG Gate 3 ZIP
-        run: npm run build:gate3
-
-      - name: Verify generated artifacts
+      - name: Run checks and retain complete logs
+        shell: bash
         run: |
-          test -s dist/triworld_v4_gate3_road_loop.zip
-          test -s dist/triworld_v4_gate3_road_loop.manifest.json
+          mkdir -p ci-logs
+          set +e
+
+          npm run build > ci-logs/application-build.log 2>&1
+          echo $? > ci-logs/application-build.exit
+
+          npm run test:gate3 > ci-logs/gate3-tests.log 2>&1
+          echo $? > ci-logs/gate3-tests.exit
+
+          npm run build:gate3 > ci-logs/gate3-package.log 2>&1
+          echo $? > ci-logs/gate3-package.exit
+
+          set -e
+          echo "Application build exit: $(cat ci-logs/application-build.exit)"
+          echo "Gate 3 tests exit: $(cat ci-logs/gate3-tests.exit)"
+          echo "Gate 3 package exit: $(cat ci-logs/gate3-package.exit)"
+
+      - name: Upload CI diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triworld-v4-gate3-ci-logs
+          path: ci-logs
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload Gate 3 package
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: triworld-v4-gate3-road-loop
           path: |
             dist/triworld_v4_gate3_road_loop.zip
             dist/triworld_v4_gate3_road_loop.manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
+
+      - name: Enforce Gate 3 acceptance
+        shell: bash
+        run: |
+          test "$(cat ci-logs/application-build.exit)" = "0"
+          test "$(cat ci-logs/gate3-tests.exit)" = "0"
+          test "$(cat ci-logs/gate3-package.exit)" = "0"
+          test -s dist/triworld_v4_gate3_road_loop.zip
+          test -s dist/triworld_v4_gate3_road_loop.manifest.json
