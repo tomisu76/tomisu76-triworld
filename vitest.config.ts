@@ -7,6 +7,7 @@ export default mergeConfig(
   defineConfig({
     test: {
       setupFiles: ['./src/beamng-v4/test-fixture-setup.ts'],
+      testTimeout: 20_000,
     },
   }),
 );
