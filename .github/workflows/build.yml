@@ -16,7 +16,19 @@ jobs:
           node-version: 22
       - run: npm install --silent
       - name: Test
-        run: npm test -- --reporter=verbose
+        id: tests
+        continue-on-error: true
+        run: npm test -- --reporter=json --outputFile=test-results.json
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-road-test-results
+          path: test-results.json
+          if-no-files-found: error
+      - name: Enforce test result
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
       - name: TypeScript typecheck
         run: npx tsc --noEmit
       - name: Web production build
