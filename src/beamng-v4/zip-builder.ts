@@ -30,6 +30,19 @@ export async function buildBeamNgZipPackage(
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_n.png', content: files.normalPng },
   ];
 
+  if (files.roadDiffusePng) {
+    entries.push({
+      zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt_d.png',
+      content: files.roadDiffusePng,
+    });
+  }
+  if (files.roadNormalPng) {
+    entries.push({
+      zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt_n.png',
+      content: files.roadNormalPng,
+    });
+  }
+
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
 
   const packagedFileHashes: Record<string, string> = {};
