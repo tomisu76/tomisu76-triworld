@@ -9,6 +9,9 @@ export interface LevelPackageOptions {
   extraMarkers?: LevelMarker[];
   diffusePng?: Uint8Array;
   normalPng?: Uint8Array;
+  roadDae?: string;
+  asphaltPng?: Uint8Array;
+  asphaltMaterialName?: string;
 }
 
 export interface LevelPackageFiles {
@@ -18,6 +21,8 @@ export interface LevelPackageFiles {
   materialsJson: string;
   diffusePng: Uint8Array;
   normalPng?: Uint8Array;
+  roadDae?: string;
+  asphaltPng?: Uint8Array;
 }
 
 export function generateLevelPackageFiles(
@@ -121,6 +126,22 @@ export function generateLevelPackageFiles(
     itemObjects.push(defaultSpawnObj as any);
   }
 
+  if (options.roadDae) {
+    const roadMeshObj = {
+      name: "road_surface_mesh",
+      class: "TSStatic",
+      __parent: "MissionGroup",
+      shapeName: `/levels/${levelName}/art/road/road_surface.dae`,
+      position: [0, 0, 0],
+      rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      scale: [1, 1, 1],
+      collisionType: "Visible Mesh",
+      decalType: "Collision Mesh",
+      useInstanceRenderData: true,
+    };
+    itemObjects.push(roadMeshObj as any);
+  }
+
   // Line-delimited JSON for items.level.json
   const itemsLevelJson = itemObjects.map((obj) => JSON.stringify(obj)).join('\n');
 
@@ -148,9 +169,27 @@ export function generateLevelPackageFiles(
     groundMat.normalMap = `/levels/${levelName}/art/terrains/ground_n.png`;
   }
 
-  const materialsJsonObj = {
+  const materialsJsonObj: Record<string, unknown> = {
     [`${levelName}_ground`]: groundMat,
   };
+
+  if (options.roadDae) {
+    const matName = options.asphaltMaterialName ?? "triworld_asphalt";
+    materialsJsonObj[matName] = {
+      class: "Material",
+      internalName: matName,
+      persistentId: "7f8b91c2-3e4a-4d56-b789-0123456789ab",
+      Stages: [
+        {
+          colorMap: `/levels/${levelName}/art/road/asphalt_d.png`,
+          roughness: 0.8,
+          metalness: 0.1,
+        },
+      ],
+      groundmodelName: "ASPHALT",
+      annotation: "ROAD",
+    };
+  }
 
   const diffusePng = options.diffusePng ?? generateSolidPng(16, 16, 40, 120, 50); // Soft green grass
   const normalPng = options.normalPng ?? generateSolidPng(16, 16, 128, 128, 255); // Flat normal map (Z up)
@@ -162,5 +201,7 @@ export function generateLevelPackageFiles(
     materialsJson: JSON.stringify(materialsJsonObj, null, 2),
     diffusePng,
     normalPng,
+    roadDae: options.roadDae,
+    asphaltPng: options.asphaltPng,
   };
 }
