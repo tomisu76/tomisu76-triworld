@@ -15,3 +15,7 @@ jobs:
           python-version: '3.12'
       - run: pip install pillow
       - run: python scripts/verify-elevation.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elevation-verification
+          path: elevation-verification.json
