@@ -16,21 +16,9 @@ jobs:
           node-version: 22
       - run: npm install --silent
       - name: Test
-        run: npm test -- --reporter=dot
+        run: npm test -- --reporter=verbose
       - name: TypeScript typecheck
-        id: typecheck
-        continue-on-error: true
-        run: npx tsc --noEmit > typecheck.log 2>&1
-      - name: Upload typecheck diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v4-road-typecheck
-          path: typecheck.log
-          if-no-files-found: error
-      - name: Fail on typecheck errors
-        if: steps.typecheck.outcome == 'failure'
-        run: cat typecheck.log && exit 1
+        run: npx tsc --noEmit
       - name: Web production build
         run: npx vite build
       - name: BeamNG road-first ZIP
