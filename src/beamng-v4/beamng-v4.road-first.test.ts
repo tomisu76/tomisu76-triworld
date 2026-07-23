@@ -4,20 +4,18 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import { describe, expect, test } from 'vitest';
 import { generateLevelPackageFiles } from './level-generator';
-import {
-  buildMountainLoopRoadFirstTerrain,
-  MOUNTAIN_LOOP_CENTER_WGS84,
-} from './road-first-terrain';
+import { buildValidatedMountainLoopTerrain } from './road-first-finalizer';
+import { MOUNTAIN_LOOP_CENTER_WGS84 } from './road-first-terrain';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
   test('1. closed road has bounded grade, bank and a stable BeamNG DecalRoad', () => {
-    const result = buildMountainLoopRoadFirstTerrain({
+    const result = buildValidatedMountainLoopTerrain({
       size: 256,
       squareSize: 1,
       centerWgs84: MOUNTAIN_LOOP_CENTER_WGS84,
       stationSpacing: 3,
-      maximumGrade: 0.075,
+      maximumGrade: 0.10,
     });
 
     expect(result.artifact.version).toBe(9);
@@ -26,12 +24,12 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     expect(result.road.nodes.length).toBeGreaterThan(50);
     expect(result.road.nodes[0]).toEqual(result.road.nodes[result.road.nodes.length - 1]);
     expect(result.stats.roadLengthMetres).toBeGreaterThan(550);
-    expect(result.stats.maximumGrade).toBeLessThanOrEqual(0.10001);
+    expect(result.stats.maximumGrade).toBeLessThanOrEqual(0.100001);
     expect(result.stats.maximumBank).toBeLessThanOrEqual(0.04501);
   });
 
-  test('2. collision terrain is physically conformed to the engineered road profile', () => {
-    const result = buildMountainLoopRoadFirstTerrain({ size: 256, squareSize: 1, stationSpacing: 3 });
+  test('2. collision terrain is physically conformed to the finalized road profile', () => {
+    const result = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1, stationSpacing: 3 });
     expect(result.stats.modifiedTerrainSamples).toBeGreaterThan(10_000);
     expect(result.stats.maximumCutMetres).toBeGreaterThan(0);
     expect(result.stats.maximumFillMetres).toBeGreaterThan(0);
@@ -44,7 +42,7 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
   });
 
   test('3. generated items and materials contain a valid AI DecalRoad and local asphalt assets', () => {
-    const result = buildMountainLoopRoadFirstTerrain({ size: 256, squareSize: 1 });
+    const result = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     const files = generateLevelPackageFiles(result.artifact, {
       extraObjects: [result.road as unknown as Record<string, unknown>],
     });
@@ -61,15 +59,15 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
   });
 
   test('4. deterministic road-first builds produce byte-identical native terrain and nodes', () => {
-    const first = buildMountainLoopRoadFirstTerrain({ size: 256, squareSize: 1 });
-    const second = buildMountainLoopRoadFirstTerrain({ size: 256, squareSize: 1 });
+    const first = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
+    const second = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     expect(first.artifact.heightMapU16).toEqual(second.artifact.heightMapU16);
     expect(first.road.nodes).toEqual(second.road.nodes);
     expect(first.stats).toEqual(second.stats);
   });
 
   test('5. ZIP contains terrain collision, DecalRoad scene data and asphalt textures', async () => {
-    const result = buildMountainLoopRoadFirstTerrain({ size: 256, squareSize: 1 });
+    const result = buildValidatedMountainLoopTerrain({ size: 256, squareSize: 1 });
     const files = generateLevelPackageFiles(result.artifact, {
       title: 'TriWorld V4 Road-First Validation',
       extraObjects: [result.road as unknown as Record<string, unknown>],
