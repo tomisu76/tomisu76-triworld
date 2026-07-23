@@ -2,19 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
-import { buildMountainLoopRoadFirstTerrain } from './road-first-terrain';
+import { buildValidatedMountainLoopTerrain } from './road-first-finalizer';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 async function main(): Promise<void> {
   console.log('Building TriWorld V4 road-first mountain circuit...');
-  const result = buildMountainLoopRoadFirstTerrain({
+  const result = buildValidatedMountainLoopTerrain({
     size: 1024,
     squareSize: 1,
     maxHeight: 500,
     roadWidth: 7.2,
     shoulderWidth: 1.6,
-    // Conservative solver target leaves reserve below the 10% acceptance ceiling.
-    maximumGrade: 0.075,
+    maximumGrade: 0.10,
     maximumBank: 0.045,
     designSpeedKmh: 55,
     stationSpacing: 4,
