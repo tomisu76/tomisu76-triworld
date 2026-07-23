@@ -31,7 +31,6 @@ export function generateAnalyticGate0Terrain(
       minZ = Math.min(minZ, unquantizedZ);
       maxZ = Math.max(maxZ, unquantizedZ);
 
-      // Quantization
       const encoded = Math.min(65535, Math.max(0, Math.round(unquantizedZ / heightScale)));
       heightMapU16[idx] = encoded;
     }
@@ -77,9 +76,16 @@ export function generateAnalyticGate0Terrain(
   const artifact: BeamNGTerrainArtifact = {
     version: 9,
     size,
+    squareSize,
+    maxHeight,
+    heightScale,
+    terrainPosition,
     heightMapU16,
     layerMapU8,
     materialNames: ['triworld_v4_ground'],
+    minimumDecodedElevation: minDecodedZ,
+    maximumDecodedElevation: maxDecodedZ,
+    controlPoints,
   };
 
   return { result, artifact };

@@ -1,0 +1,24 @@
+{
+  "name": "jankov_vrsok_demo",
+  "closed": true,
+  "roadWidth": 7.2,
+  "shoulderWidth": 1.8,
+  "maximumGrade": 0.10,
+  "maximumBank": 0.045,
+  "designSpeedKmh": 55,
+  "stationSpacing": 4,
+  "minimumBlendWidth": 22,
+  "maximumBlendWidth": 70,
+  "points": [
+    { "longitude": 18.353763763, "latitude": 48.724103144 },
+    { "longitude": 18.354308459, "latitude": 48.726438753 },
+    { "longitude": 18.356487240, "latitude": 48.727696389 },
+    { "longitude": 18.359619238, "latitude": 48.727831136 },
+    { "longitude": 18.362478889, "latitude": 48.726887909 },
+    { "longitude": 18.363500193, "latitude": 48.724866709 },
+    { "longitude": 18.362478889, "latitude": 48.722486184 },
+    { "longitude": 18.359619238, "latitude": 48.721273464 },
+    { "longitude": 18.356146805, "latitude": 48.721498042 },
+    { "longitude": 18.353763763, "latitude": 48.722665847 }
+  ]
+}

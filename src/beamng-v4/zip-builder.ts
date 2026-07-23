@@ -15,7 +15,7 @@ export async function buildBeamNgZipPackage(
   artifact: BeamNGTerrainArtifact,
   files: LevelPackageFiles,
   targetZipPath: string,
-  targetManifestPath: string
+  targetManifestPath: string,
 ): Promise<ValidationManifest> {
   const terBuffer = writeBeamNGTer(artifact);
   const zip = new JSZip();
@@ -28,6 +28,10 @@ export async function buildBeamNgZipPackage(
     { zipPath: 'levels/triworld_v4/art/terrains/main.materials.json', content: files.materialsJson },
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_d.png', content: files.diffusePng },
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_n.png', content: files.normalPng },
+    { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_macro.png', content: files.terrainMacroPng },
+    { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_detail.png', content: files.terrainDetailPng },
+    { zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt.color.png', content: files.roadDiffusePng },
+    { zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt.normal.png', content: files.roadNormalPng },
   ];
 
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
@@ -37,6 +41,7 @@ export async function buildBeamNgZipPackage(
   for (const entry of entries) {
     zip.file(entry.zipPath, entry.content, {
       date: new Date('2026-07-23T12:00:00Z'),
+      createFolders: false,
     });
     packagedFileHashes[entry.zipPath] = sha256(entry.content);
   }
