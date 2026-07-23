@@ -28,6 +28,8 @@ export async function buildBeamNgZipPackage(
     { zipPath: 'levels/triworld_v4/art/terrains/main.materials.json', content: files.materialsJson },
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_d.png', content: files.diffusePng },
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_n.png', content: files.normalPng },
+    { zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt.color.png', content: files.roadDiffusePng },
+    { zipPath: 'levels/triworld_v4/art/roads/triworld_v4_asphalt.normal.png', content: files.roadNormalPng },
   ];
 
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
