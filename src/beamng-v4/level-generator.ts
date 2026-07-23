@@ -1,5 +1,12 @@
-import type { AnalyticTerrainResult } from './types';
+import type { BeamNGTerrainArtifact } from './types';
 import { generateSolidPng } from './texture-generator';
+import type { LevelMarker } from './diagnostic-markers';
+
+export interface LevelPackageOptions {
+  title?: string;
+  description?: string;
+  extraMarkers?: LevelMarker[];
+}
 
 export interface LevelPackageFiles {
   infoJson: string;
@@ -10,18 +17,30 @@ export interface LevelPackageFiles {
   normalPng: Uint8Array;
 }
 
-export function generateLevelPackageFiles(analytic: AnalyticTerrainResult): LevelPackageFiles {
-  const spawnZ = analytic.controlPoints.p256_256.decoded + 3.0; // 3m safe offset above terrain
+export function generateLevelPackageFiles(
+  artifact: Pick<BeamNGTerrainArtifact, 'size' | 'squareSize' | 'maxHeight'> & {
+    controlPoints?: Record<string, { decoded: number }>;
+  },
+  options: LevelPackageOptions = {}
+): LevelPackageFiles {
+  const size = artifact.size;
+  const half = (size * artifact.squareSize) / 2;
+  const defaultSpawnZ = artifact.controlPoints?.p256_256?.decoded
+    ? artifact.controlPoints.p256_256.decoded + 3.0
+    : 30.0;
+
+  const title = options.title ?? "TriWorld V4 Native Gate 0";
+  const description = options.description ?? "Native BeamNG terrain format validation level";
 
   const infoObj = {
-    title: "TriWorld V4 Native Gate 0",
-    description: "Native BeamNG terrain format validation level",
+    title,
+    description,
     authors: "TriWorld",
-    size: [analytic.size, analytic.size],
+    size: [size, size],
     defaultSpawnPointName: "spawns_default",
     spawnPoints: [
       {
-        translationId: "TriWorld V4 Default Spawn",
+        translationId: `${title} Default Spawn`,
         description: "Centre validation spawn",
         objectname: "spawns_default",
       },
@@ -65,40 +84,49 @@ export function generateLevelPackageFiles(analytic: AnalyticTerrainResult): Leve
     position: [0, 0, 0],
     rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     scale: [1, 1, 1],
-    squareSize: analytic.squareSize,
-    maxHeight: analytic.maxHeight,
+    squareSize: artifact.squareSize,
+    maxHeight: artifact.maxHeight,
     baseTexSize: 1024,
     lightMapSize: 256,
     screenError: 16,
     castShadows: true,
   };
 
-  const spawnSphereObj = {
+  const defaultSpawnObj = {
     name: "spawns_default",
     class: "SpawnSphere",
     __parent: "MissionGroup",
-    position: [256, 256, spawnZ],
+    position: [half, half, defaultSpawnZ],
     rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     scale: [1, 1, 1],
     dataBlock: "SpawnSphereMarker",
   };
 
+  const itemObjects = [
+    missionGroupObj,
+    levelInfoObj,
+    scatterSkyObj,
+    terrainBlockObj,
+  ];
+
+  if (options.extraMarkers && options.extraMarkers.length > 0) {
+    for (const marker of options.extraMarkers) {
+      itemObjects.push(marker as any);
+    }
+  } else {
+    itemObjects.push(defaultSpawnObj as any);
+  }
+
   // Line-delimited JSON for items.level.json
-  const itemsLevelJson = [
-    JSON.stringify(missionGroupObj),
-    JSON.stringify(levelInfoObj),
-    JSON.stringify(scatterSkyObj),
-    JSON.stringify(terrainBlockObj),
-    JSON.stringify(spawnSphereObj),
-  ].join('\n');
+  const itemsLevelJson = itemObjects.map((obj) => JSON.stringify(obj)).join('\n');
 
   const terrainJsonObj = {
     version: 9,
     datafile: "terrain.ter",
-    size: analytic.size,
-    heightMapSize: analytic.size,
+    size,
+    heightMapSize: size,
     heightMapItemSize: 2,
-    layerMapSize: analytic.size,
+    layerMapSize: size,
     layerMapItemSize: 1,
     materials: ["triworld_v4_ground"],
   };

@@ -3,19 +3,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
 import { generateAnalyticGate0Terrain } from './analytic-terrain';
-import { generateLevelPackageFiles } from './level-generator';
+import { generateLevelPackageFiles, type LevelPackageFiles } from './level-generator';
 import { writeBeamNGTer } from './writer';
-import type { ValidationManifest } from './types';
+import type { BeamNGTerrainArtifact, ValidationManifest } from './types';
 
 export function sha256(data: Uint8Array | string): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-export async function buildGate0ZipPackage(outputDir: string = 'dist'): Promise<{ zipPath: string; manifestPath: string; manifest: ValidationManifest }> {
-  const { result: analytic, artifact } = generateAnalyticGate0Terrain(512, 1.0, 100.0, [0, 0, 0]);
+export async function buildBeamNgZipPackage(
+  artifact: BeamNGTerrainArtifact,
+  files: LevelPackageFiles,
+  targetZipPath: string,
+  targetManifestPath: string
+): Promise<ValidationManifest> {
   const terBuffer = writeBeamNGTer(artifact);
-  const files = generateLevelPackageFiles(analytic);
-
   const zip = new JSZip();
 
   const entries: Array<{ zipPath: string; content: Uint8Array | string }> = [
@@ -28,14 +30,13 @@ export async function buildGate0ZipPackage(outputDir: string = 'dist'): Promise<
     { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_n.png', content: files.normalPng },
   ];
 
-  // Sort entries deterministically by path
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));
 
   const packagedFileHashes: Record<string, string> = {};
 
   for (const entry of entries) {
     zip.file(entry.zipPath, entry.content, {
-      date: new Date('2026-07-23T12:00:00Z'), // Deterministic timestamp
+      date: new Date('2026-07-23T12:00:00Z'),
     });
     packagedFileHashes[entry.zipPath] = sha256(entry.content);
   }
@@ -46,29 +47,29 @@ export async function buildGate0ZipPackage(outputDir: string = 'dist'): Promise<
     compressionOptions: { level: 9 },
   });
 
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
+  const zipDir = path.dirname(targetZipPath);
+  if (!fs.existsSync(zipDir)) {
+    fs.mkdirSync(zipDir, { recursive: true });
   }
 
-  const zipPath = path.join(outputDir, 'triworld_v4_gate0.zip');
-  fs.writeFileSync(zipPath, zipUint8Array);
+  fs.writeFileSync(targetZipPath, zipUint8Array);
 
   const manifest: ValidationManifest = {
-    targetBeamNgBuild: "0.36.4.0",
+    targetBeamNgBuild: '0.36.4.0',
     terrainVersion: artifact.version,
     terrainSize: artifact.size,
-    squareSize: analytic.squareSize,
-    maxHeight: analytic.maxHeight,
-    heightScale: analytic.heightScale,
-    terrainPosition: analytic.terrainPosition,
-    minimumDecodedElevation: analytic.minElevation,
-    maximumDecodedElevation: analytic.maxElevation,
+    squareSize: artifact.squareSize,
+    maxHeight: artifact.maxHeight,
+    heightScale: artifact.heightScale,
+    terrainPosition: [0, 0, 0],
+    minimumDecodedElevation: artifact.minimumDecodedElevation,
+    maximumDecodedElevation: artifact.maximumDecodedElevation,
     controlPointElevations: {
-      p0_0: analytic.controlPoints.p0_0.decoded,
-      p511_0: analytic.controlPoints.p511_0.decoded,
-      p0_511: analytic.controlPoints.p0_511.decoded,
-      p511_511: analytic.controlPoints.p511_511.decoded,
-      p256_256: analytic.controlPoints.p256_256.decoded,
+      p0_0: artifact.heightMapU16[0] * artifact.heightScale,
+      p511_0: artifact.heightMapU16[artifact.size - 1] * artifact.heightScale,
+      p0_511: artifact.heightMapU16[(artifact.size - 1) * artifact.size] * artifact.heightScale,
+      p511_511: artifact.heightMapU16[artifact.size * artifact.size - 1] * artifact.heightScale,
+      p256_256: artifact.heightMapU16[Math.floor(artifact.size / 2) * artifact.size + Math.floor(artifact.size / 2)] * artifact.heightScale,
     },
     heightMapHash: sha256(new Uint8Array(artifact.heightMapU16.buffer)),
     layerMapHash: sha256(artifact.layerMapU8),
@@ -77,8 +78,22 @@ export async function buildGate0ZipPackage(outputDir: string = 'dist'): Promise<
     zipManifestHash: sha256(zipUint8Array),
   };
 
-  const manifestPath = path.join(outputDir, 'triworld_v4_gate0.manifest.json');
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  const manifestDir = path.dirname(targetManifestPath);
+  if (!fs.existsSync(manifestDir)) {
+    fs.mkdirSync(manifestDir, { recursive: true });
+  }
 
+  fs.writeFileSync(targetManifestPath, JSON.stringify(manifest, null, 2));
+
+  return manifest;
+}
+
+export async function buildGate0ZipPackage(outputDir: string = 'dist'): Promise<{ zipPath: string; manifestPath: string; manifest: ValidationManifest }> {
+  const { result: analytic, artifact } = generateAnalyticGate0Terrain(512, 1.0, 100.0, [0, 0, 0]);
+  const files = generateLevelPackageFiles(analytic);
+  const zipPath = path.join(outputDir, 'triworld_v4_gate0.zip');
+  const manifestPath = path.join(outputDir, 'triworld_v4_gate0.manifest.json');
+
+  const manifest = await buildBeamNgZipPackage(artifact, files, zipPath, manifestPath);
   return { zipPath, manifestPath, manifest };
 }
