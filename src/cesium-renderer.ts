@@ -76,9 +76,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
 
   const metrics = computeSceneMetrics(scene.meshes);
   const anchor = Cartesian3.fromDegrees(scene.anchor.longitude, scene.anchor.latitude, scene.anchor.height);
-  const enuMatrix = Transforms.eastNorthUpToFixedFrame(anchor);
-  const localLift = Matrix4.fromTranslation(new Cartesian3(0, 0, metrics.verticalOffset));
-  const modelMatrix = Matrix4.multiply(enuMatrix, localLift, new Matrix4());
+  const modelMatrix = Transforms.eastNorthUpToFixedFrame(anchor);
   const materials = new Map(scene.materials.map((material) => [material.id, material]));
   const surfacePrimitives = new Map<string, Primitive>();
   const wirePrimitives = new Map<string, Primitive>();
@@ -108,7 +106,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     position: Cartesian3.fromDegrees(
       scene.anchor.longitude,
       scene.anchor.latitude,
-      scene.anchor.height + metrics.verticalOffset + 12,
+      scene.anchor.height + 12,
     ),
     point: {
       pixelSize: 13,
@@ -148,9 +146,10 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
   }
 
   function resetCamera(): void {
+    const vertical = Math.max(metrics.radius * 0.58, metrics.relief * 2.2, 180);
     viewer.camera.lookAtTransform(
       modelMatrix,
-      new Cartesian3(metrics.radius * 1.15, -metrics.radius * 1.35, metrics.radius * 0.92),
+      new Cartesian3(metrics.radius * 1.08, -metrics.radius * 1.28, vertical),
     );
     viewer.scene.requestRender();
   }
@@ -165,7 +164,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       ),
       orientation: {
         heading: 0,
-        pitch: CesiumMath.toRadians(-76),
+        pitch: CesiumMath.toRadians(-88),
         roll: 0,
       },
       duration: 1.1,
@@ -328,7 +327,7 @@ function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): Poin
   return collection;
 }
 
-function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; verticalOffset: number } {
+function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; relief: number } {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -349,8 +348,7 @@ function computeSceneMetrics(meshes: CanonicalMesh[]): { radius: number; vertica
 
   const width = maxX - minX;
   const depth = maxY - minY;
-  const height = maxZ - minZ;
-  const radius = Math.max(90, Math.hypot(width, depth, height) * 0.56);
-  const verticalOffset = Math.max(2, 3 - minZ);
-  return { radius, verticalOffset };
+  const relief = maxZ - minZ;
+  const radius = Math.max(90, Math.hypot(width, depth, relief) * 0.56);
+  return { radius, relief };
 }
