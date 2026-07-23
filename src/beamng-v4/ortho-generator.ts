@@ -6,11 +6,13 @@
 
 import { GeodeticTransformer, BANOVCE_ORIGIN_WGS84 } from './geodetic-transformer';
 import { generateCustomPng, generateSolidPng } from './texture-generator';
+import { PNG } from 'pngjs';
 
 export interface OrthoGeneratorOptions {
   sizeMetres?: number;
   textureSize?: number;
   transformer?: GeodeticTransformer;
+  corridorPriorityBuffer?: Uint8Array;
 }
 
 export interface OrthoGeneratorResult {
@@ -74,8 +76,39 @@ export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions 
       const buffer = new Uint8Array(await res.arrayBuffer());
       if (buffer.length > 50000 && buffer[0] === 137 && buffer[1] === 80) {
         const normalPng = generateSolidPng(textureSize, textureSize, 128, 128, 255);
+        let finalDiffusePng = buffer;
+
+        if (options.corridorPriorityBuffer) {
+          try {
+            const decoded = PNG.sync.read(Buffer.from(buffer));
+            const priority = options.corridorPriorityBuffer;
+            // Decode sizes usually match textureSize (e.g. 1024x1024)
+            const w = decoded.width;
+            const h = decoded.height;
+            if (priority.length === w * h) {
+              for (let i = 0; i < priority.length; i++) {
+                const p = priority[i];
+                if (p === 3) {
+                  // PRIORITY_GROUND_ROAD_SURFACE -> Asphalt gray
+                  decoded.data[i * 4 + 0] = 60;
+                  decoded.data[i * 4 + 1] = 60;
+                  decoded.data[i * 4 + 2] = 65;
+                } else if (p === 1) {
+                  // PRIORITY_SLOPE -> Tint dirt/grass
+                  decoded.data[i * 4 + 0] = Math.min(255, decoded.data[i * 4 + 0] * 0.8 + 40);
+                  decoded.data[i * 4 + 1] = Math.min(255, decoded.data[i * 4 + 1] * 0.8 + 30);
+                  decoded.data[i * 4 + 2] = Math.min(255, decoded.data[i * 4 + 2] * 0.8 + 20);
+                }
+              }
+              finalDiffusePng = new Uint8Array(PNG.sync.write(decoded));
+            }
+          } catch (err) {
+            console.warn('Failed to overlay road corridor on ortho:', err);
+          }
+        }
+
         return {
-          diffusePng: buffer,
+          diffusePng: finalDiffusePng,
           normalPng,
           width: textureSize,
           height: textureSize,

@@ -1,12 +1,14 @@
 /**
- * GIS Real-World Terrain Generator — TriWorld V4 Gate 1 & Gate 2
+ * GIS Real-World Terrain Generator — TriWorld V4 Gate 1 & Gate 2 & Gate 3
  * Generates native BeamNG terrain for Bánovce nad Bebravou region using real global DEM raster data
- * (Copernicus / AWS Terrarium 30m DEM elevation tiles) with smooth 2D bilinear interpolation.
+ * (Copernicus / AWS Terrarium 30m DEM elevation tiles) with smooth 2D bilinear interpolation
+ * and coupled 3D road corridor formation bed flattening (Gate 3).
  */
 
 import { PNG } from 'pngjs';
 import { BeamNGTerrainArtifact } from './types';
 import { GeodeticTransformer, BANOVCE_ORIGIN_WGS84, Wgs84Point } from './geodetic-transformer';
+import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
 
 export interface GisTerrainConfig {
   size: number; // e.g. 1024
@@ -14,6 +16,7 @@ export interface GisTerrainConfig {
   maxHeight: number; // e.g. 500.0 (max elevation range ceiling)
   centerWgs84?: Wgs84Point;
   useRealDem?: boolean;
+  withRoadCorridor?: boolean;
 }
 
 export interface GisTerrainResult {
@@ -23,6 +26,8 @@ export interface GisTerrainResult {
   scannedMinElevation: number;
   scannedMaxElevation: number;
   isRealDem: boolean;
+  hasRoadCorridor: boolean;
+  corridorPriorityBuffer?: Uint8Array;
   sampleElevation: (xMetres: number, yMetres: number) => number;
 }
 
@@ -223,6 +228,7 @@ export function buildBanovceRealWorldTerrain(config: Partial<GisTerrainConfig> =
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem: false,
+    hasRoadCorridor: false,
     sampleElevation,
   };
 }
@@ -235,6 +241,7 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   const squareSize = config.squareSize ?? 1.0;
   const maxHeight = config.maxHeight ?? 500.0;
   const centerWgs84 = config.centerWgs84 ?? BANOVCE_ORIGIN_WGS84;
+  const withRoadCorridor = config.withRoadCorridor ?? true; // Default to including road corridor in Gate 3
 
   const transformer = new GeodeticTransformer(centerWgs84, size * squareSize);
   const zoom = 14;
@@ -251,7 +258,6 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
     const wgs = transformer.localToWgs84({ ...corner, z: 0 });
     const { tileX, tileY } = wgs84ToTileCoords(wgs.longitude, wgs.latitude, zoom);
     neededTiles.push({ tileX, tileY });
-    // Also include adjacent 8 tiles to ensure seamless bilinear interpolation at boundaries
     neededTiles.push({ tileX: tileX - 1, tileY });
     neededTiles.push({ tileX: tileX + 1, tileY });
     neededTiles.push({ tileX, tileY: tileY - 1 });
@@ -262,8 +268,6 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   const isRealDem = tileMap.size > 0;
 
   const rawElevations = new Float32Array(size * size);
-  let rawMin = Number.POSITIVE_INFINITY;
-  let rawMax = Number.NEGATIVE_INFINITY;
 
   for (let r = 0; r < size; r++) {
     const yMetres = (size - 1 - r) * squareSize;
@@ -279,20 +283,29 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
       }
 
       rawElevations[r * size + c] = z;
-      if (z < rawMin) rawMin = z;
-      if (z > rawMax) rawMax = z;
+    }
+  }
+
+  let heightMapU16: Uint16Array;
+  let finalElevations = rawElevations;
+  let corridorPriorityBuffer: Uint8Array | undefined = undefined;
+
+  if (withRoadCorridor) {
+    const corridorResult = applyCoupledRoadTerrainCorridor(rawElevations, size, squareSize, maxHeight);
+    finalElevations = corridorResult.workingElevations;
+    heightMapU16 = corridorResult.heightMapU16;
+    corridorPriorityBuffer = corridorResult.priorityBuffer;
+  } else {
+    const heightScale = maxHeight / 65535.0;
+    heightMapU16 = new Uint16Array(size * size);
+    for (let i = 0; i < rawElevations.length; i++) {
+      const val = rawElevations[i];
+      const quantized = Math.round(val / heightScale);
+      heightMapU16[i] = Math.max(0, Math.min(65535, quantized));
     }
   }
 
   const heightScale = maxHeight / 65535.0;
-  const heightMapU16 = new Uint16Array(size * size);
-
-  for (let i = 0; i < rawElevations.length; i++) {
-    const val = rawElevations[i];
-    const quantized = Math.round(val / heightScale);
-    heightMapU16[i] = Math.max(0, Math.min(65535, quantized));
-  }
-
   let scannedMin = Number.POSITIVE_INFINITY;
   let scannedMax = Number.NEGATIVE_INFINITY;
 
@@ -320,16 +333,18 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   const sampleElevation = (xMetres: number, yMetres: number): number => {
     const c = Math.max(0, Math.min(size - 1, Math.round(xMetres / squareSize)));
     const r = Math.max(0, Math.min(size - 1, Math.round((size - 1 - yMetres / squareSize))));
-    return rawElevations[r * size + c];
+    return finalElevations[r * size + c];
   };
 
   return {
     artifact,
     transformer,
-    rawElevations,
+    rawElevations: finalElevations,
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem,
+    hasRoadCorridor: withRoadCorridor,
+    corridorPriorityBuffer,
     sampleElevation,
   };
 }
