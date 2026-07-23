@@ -1,5 +1,6 @@
 import {
   buildMountainLoopRoadFirstTerrain,
+  type NativeDecalRoad,
   type RoadFirstConfig,
   type RoadFirstStation,
   type RoadFirstTerrainResult,
@@ -7,35 +8,40 @@ import {
 import type { BeamNGTerrainArtifact } from './types';
 
 const CELL_SIZE_METRES = 32;
+const MAXIMUM_DAYLIGHT_SLOPE = 0.28;
 
 interface IndexedSegment {
   a: RoadFirstStation;
   b: RoadFirstStation;
 }
 
-/**
- * Final acceptance pass for the road-first pipeline.
- *
- * The preliminary designer follows and smooths the DEM. This pass projects the
- * entire closed profile onto the exact per-segment grade constraints, including
- * the closing segment, and then re-conforms the native TerrainBlock collision
- * heightfield to that accepted profile.
- */
+interface TerrainRepairResult {
+  transitionMask: Uint8Array;
+  maximumCutMetres: number;
+  maximumFillMetres: number;
+  modifiedTerrainSamples: number;
+  minimumElevation: number;
+  maximumElevation: number;
+}
+
 export function buildValidatedMountainLoopTerrain(
   config: RoadFirstConfig = {},
 ): RoadFirstTerrainResult {
   const result = buildMountainLoopRoadFirstTerrain(config);
   const maximumGrade = clamp(config.maximumGrade ?? 0.10, 0.03, 0.18);
-  const shoulderWidth = clamp(config.shoulderWidth ?? 1.6, 0.5, 5);
-  const minimumBlendWidth = clamp(config.minimumBlendWidth ?? 10, 4, 30);
+  const shoulderWidth = clamp(config.shoulderWidth ?? 1.8, 0.5, 5);
+  const minimumBlendWidth = clamp(config.minimumBlendWidth ?? 22, 8, 35);
   const maximumBlendWidth = clamp(
-    config.maximumBlendWidth ?? 42,
+    config.maximumBlendWidth ?? 70,
     minimumBlendWidth,
     70,
   );
 
   enforceClosedGradeConstraint(result.roadStations, maximumGrade);
-  const repairStats = reconformTerrain(
+  configureRoadForNavigation(result.road);
+
+  const baseline = new Float32Array(result.rawElevations);
+  const repair = reconformTerrain(
     result.rawElevations,
     result.artifact.size,
     result.artifact.squareSize,
@@ -45,14 +51,27 @@ export function buildValidatedMountainLoopTerrain(
     maximumBlendWidth,
   );
 
+  smoothTransitionBand(
+    result.rawElevations,
+    result.artifact.size,
+    repair.transitionMask,
+    3,
+  );
+
+  const repairedStats = measureTerrainChanges(
+    result.rawElevations,
+    baseline,
+    repair.transitionMask,
+  );
+
   result.artifact = quantizeTerrain(
     result.artifact,
     result.rawElevations,
     result.artifact.maxHeight,
   );
   result.road.nodes = buildRoadNodes(result.roadStations, result.roadStations[0].width);
-  result.scannedMinElevation = repairStats.minimumElevation;
-  result.scannedMaxElevation = repairStats.maximumElevation;
+  result.scannedMinElevation = repairedStats.minimumElevation;
+  result.scannedMaxElevation = repairedStats.maximumElevation;
   result.sampleElevation = (x: number, y: number) => sampleHeightBilinear(
     result.rawElevations,
     result.artifact.size,
@@ -61,15 +80,41 @@ export function buildValidatedMountainLoopTerrain(
     y,
   );
   result.stats.maximumGrade = calculateMaximumGrade(result.roadStations);
-  result.stats.maximumCutMetres = Math.max(result.stats.maximumCutMetres, repairStats.maximumCutMetres);
-  result.stats.maximumFillMetres = Math.max(result.stats.maximumFillMetres, repairStats.maximumFillMetres);
+  result.stats.maximumCutMetres = Math.max(result.stats.maximumCutMetres, repairedStats.maximumCutMetres);
+  result.stats.maximumFillMetres = Math.max(result.stats.maximumFillMetres, repairedStats.maximumFillMetres);
   result.stats.modifiedTerrainSamples = Math.max(
     result.stats.modifiedTerrainSamples,
-    repairStats.modifiedTerrainSamples,
+    repairedStats.modifiedTerrainSamples,
   );
-  result.stats.minimumElevation = repairStats.minimumElevation;
-  result.stats.maximumElevation = repairStats.maximumElevation;
+  result.stats.minimumElevation = repairedStats.minimumElevation;
+  result.stats.maximumElevation = repairedStats.maximumElevation;
   return result;
+}
+
+function configureRoadForNavigation(road: NativeDecalRoad): void {
+  road.textureLength = 14;
+  road.breakAngle = 1;
+  road.renderPriority = 20;
+  road.zBias = 0.001;
+  road.decalBias = 0.004;
+  road.distanceFade = [5000, 700];
+  road.startEndFade = [0, 0];
+  road.overObjects = false;
+  road.drivability = 1;
+  road.autoLanes = false;
+  road.autoJunction = false;
+  road.oneWay = false;
+
+  Object.assign(road as NativeDecalRoad & Record<string, unknown>, {
+    improvedSpline: true,
+    useSubdivisions: true,
+    lanesLeft: 1,
+    lanesRight: 1,
+    flipDirection: false,
+    gatedRoad: false,
+    hiddenInNavi: false,
+    persistentId: '967948ce-cf80-47dc-9678-b98af4a8dce1',
+  });
 }
 
 export function enforceClosedGradeConstraint(
@@ -81,9 +126,6 @@ export function enforceClosedGradeConstraint(
   const targetGrade = Math.max(0, maximumGrade - 0.0001);
   const numericalToleranceMetres = 1e-7;
 
-  // Alternating projections onto all cyclic Lipschitz constraints. A small
-  // design reserve absorbs floating-point residuals; acceptance is decided by
-  // the measured final grade rather than an arbitrary absolute residual.
   for (let pass = 0; pass < 20_000; pass++) {
     let maximumViolation = 0;
     for (let index = 0; index < stations.length; index++) {
@@ -127,13 +169,7 @@ function reconformTerrain(
   shoulderWidth: number,
   minimumBlendWidth: number,
   maximumBlendWidth: number,
-): {
-  maximumCutMetres: number;
-  maximumFillMetres: number;
-  modifiedTerrainSamples: number;
-  minimumElevation: number;
-  maximumElevation: number;
-} {
+): TerrainRepairResult {
   const segments: IndexedSegment[] = [];
   const cells = new Map<string, number[]>();
   const searchRadius = stations[0].width / 2 + shoulderWidth + maximumBlendWidth;
@@ -156,6 +192,7 @@ function reconformTerrain(
     }
   }
 
+  const transitionMask = new Uint8Array(size * size);
   let maximumCutMetres = 0;
   let maximumFillMetres = 0;
   let modifiedTerrainSamples = 0;
@@ -185,9 +222,9 @@ function reconformTerrain(
             maximumBlendWidth,
           );
           if (!candidate) continue;
-          if (candidate.influence > strongestInfluence + 1e-10
-            || (Math.abs(candidate.influence - strongestInfluence) <= 1e-10
-              && candidate.distance < closestDistance)) {
+          if (candidate.distance < closestDistance - 1e-8
+            || (Math.abs(candidate.distance - closestDistance) <= 1e-8
+              && candidate.influence > strongestInfluence)) {
             strongestInfluence = candidate.influence;
             strongestTarget = candidate.target;
             closestDistance = candidate.distance;
@@ -199,6 +236,7 @@ function reconformTerrain(
       if (strongestInfluence > 0) {
         finalElevation = mix(base, strongestTarget, strongestInfluence);
         elevations[terrainIndex] = finalElevation;
+        transitionMask[terrainIndex] = Math.max(1, Math.min(255, Math.round(strongestInfluence * 255)));
         modifiedTerrainSamples += 1;
         maximumCutMetres = Math.max(maximumCutMetres, base - finalElevation);
         maximumFillMetres = Math.max(maximumFillMetres, finalElevation - base);
@@ -209,6 +247,7 @@ function reconformTerrain(
   }
 
   return {
+    transitionMask,
     maximumCutMetres,
     maximumFillMetres,
     modifiedTerrainSamples,
@@ -238,22 +277,86 @@ function sampleSegment(
   const normalY = dx / length;
   const signedLateral = (x - nearestX) * normalX + (y - nearestY) * normalY;
   const lateralDistance = Math.abs(signedLateral);
+  const side = Math.sign(signedLateral) || 1;
   const roadHalfWidth = mix(segment.a.width, segment.b.width, t) / 2;
   const innerRadius = roadHalfWidth + shoulderWidth;
   const centreElevation = mix(segment.a.z, segment.b.z, t);
   const bank = mix(segment.a.bank, segment.b.bank, t);
-  const target = centreElevation + signedLateral * bank;
+  const pavedTarget = centreElevation + signedLateral * bank;
+  const pavedEdge = centreElevation + side * roadHalfWidth * bank;
+  const shoulderDistance = Math.max(0, lateralDistance - roadHalfWidth);
+  const target = lateralDistance <= roadHalfWidth
+    ? pavedTarget
+    : pavedEdge - shoulderDistance * 0.025;
   const verticalDifference = Math.abs(baseElevation - target);
+  const slopeRequiredWidth = verticalDifference / MAXIMUM_DAYLIGHT_SLOPE;
   const blendWidth = clamp(
-    minimumBlendWidth + verticalDifference * 1.75,
+    Math.max(minimumBlendWidth, minimumBlendWidth * 0.55 + slopeRequiredWidth),
     minimumBlendWidth,
     maximumBlendWidth,
   );
   if (lateralDistance > innerRadius + blendWidth) return null;
   const influence = lateralDistance <= innerRadius
     ? 1
-    : smoothstep(1 - (lateralDistance - innerRadius) / blendWidth);
+    : smootherstep(1 - (lateralDistance - innerRadius) / blendWidth);
   return { target, influence, distance: lateralDistance };
+}
+
+function smoothTransitionBand(
+  elevations: Float32Array,
+  size: number,
+  transitionMask: Uint8Array,
+  passes: number,
+): void {
+  const scratch = new Float32Array(elevations.length);
+  for (let pass = 0; pass < passes; pass++) {
+    scratch.set(elevations);
+    for (let row = 1; row < size - 1; row++) {
+      for (let column = 1; column < size - 1; column++) {
+        const index = row * size + column;
+        const mask = transitionMask[index];
+        if (mask === 0 || mask >= 250) continue;
+        const localAverage = (
+          scratch[index] * 4
+          + scratch[index - 1]
+          + scratch[index + 1]
+          + scratch[index - size]
+          + scratch[index + size]
+        ) / 8;
+        const transitionWeight = 1 - Math.abs(mask / 255 - 0.5) * 2;
+        elevations[index] = mix(scratch[index], localAverage, 0.32 + transitionWeight * 0.28);
+      }
+    }
+  }
+}
+
+function measureTerrainChanges(
+  elevations: Float32Array,
+  baseline: Float32Array,
+  transitionMask: Uint8Array,
+): Omit<TerrainRepairResult, 'transitionMask'> {
+  let maximumCutMetres = 0;
+  let maximumFillMetres = 0;
+  let modifiedTerrainSamples = 0;
+  let minimumElevation = Number.POSITIVE_INFINITY;
+  let maximumElevation = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < elevations.length; index++) {
+    const elevation = elevations[index];
+    minimumElevation = Math.min(minimumElevation, elevation);
+    maximumElevation = Math.max(maximumElevation, elevation);
+    if (transitionMask[index] > 0) {
+      modifiedTerrainSamples += 1;
+      maximumCutMetres = Math.max(maximumCutMetres, baseline[index] - elevation);
+      maximumFillMetres = Math.max(maximumFillMetres, elevation - baseline[index]);
+    }
+  }
+  return {
+    maximumCutMetres,
+    maximumFillMetres,
+    modifiedTerrainSamples,
+    minimumElevation,
+    maximumElevation,
+  };
 }
 
 function quantizeTerrain(
@@ -332,9 +435,9 @@ function cellCoordinate(value: number): number {
   return Math.floor(value / CELL_SIZE_METRES);
 }
 
-function smoothstep(value: number): number {
+function smootherstep(value: number): number {
   const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 function round6(value: number): number {
