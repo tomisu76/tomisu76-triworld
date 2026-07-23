@@ -1,8 +1,16 @@
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './styles.css';
-import { buildSceneManifest, buildSyntheticScene, serializeScene, type CanonicalScene } from './core';
-import { createTriWorldRenderer } from './cesium-renderer';
-import { buildOsmScene, type OsmSceneStats } from './osm-scene';
+import { buildSceneManifest, serializeScene, type CanonicalScene, type SceneManifest } from './core';
+import { createTriWorldRenderer, type TriWorldRenderer } from './cesium-renderer';
+import {
+  buildOsmScene,
+  DEFAULT_AREA_SELECTION,
+  selectionToBbox,
+  type AreaSelection,
+  type OsmSceneResult,
+  type OsmSceneStats,
+} from './osm-scene';
+import { createAreaSelectionRenderer, type AreaSelectionRenderer } from './selection-renderer';
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -11,172 +19,353 @@ function requireElement<T extends Element>(selector: string): T {
 }
 
 const app = requireElement<HTMLDivElement>('#app');
-app.innerHTML = `
-  <main class="loading-screen">
-    <div class="loading-card">
-      <p class="eyebrow">TriWorld stable · 2 km test</p>
-      <h1>Compiling the larger real road network…</h1>
-      <p>Downloading the current OpenStreetMap elements for the 2 × 2 km site and converting highway centre-lines into canonical indexed triangles.</p>
-      <div class="loading-bar"><span></span></div>
+let selection: AreaSelection = { ...DEFAULT_AREA_SELECTION };
+let selectionRenderer: AreaSelectionRenderer | null = null;
+let sceneRenderer: TriWorldRenderer | null = null;
+let generatedScene: CanonicalScene | null = null;
+let generatedManifest: SceneManifest | null = null;
+
+renderSelectionMode();
+window.addEventListener('beforeunload', destroyRenderers, { once: true });
+
+function renderSelectionMode(message?: { type: 'error' | 'info'; text: string }): void {
+  destroyRenderers();
+  generatedScene = null;
+  generatedManifest = null;
+
+  app.innerHTML = renderShell(`
+    ${renderBrand()}
+    <div class="mode-tabs" aria-label="Job mode">
+      <button class="mode-tab active" type="button">▣ Single Area</button>
+      <button class="mode-tab" type="button" disabled>▦ Batch Job</button>
     </div>
-  </main>`;
 
-let osmStats: OsmSceneStats | null = null;
-let sourceError: string | null = null;
-let scene: CanonicalScene;
+    <section class="workflow-section">
+      <div class="section-title-row">
+        <span class="step-number">1</span>
+        <div>
+          <h2>Select area</h2>
+          <p>Click anywhere on the map to move the orange processing square.</p>
+        </div>
+      </div>
 
-try {
-  const result = await buildOsmScene();
-  scene = result.scene;
-  osmStats = result.stats;
-} catch (error) {
-  sourceError = error instanceof Error ? error.message : 'Unknown OpenStreetMap loading error';
-  scene = buildSyntheticScene();
+      <label class="field-label" for="areaSize">Area size</label>
+      <select id="areaSize" class="field-control">
+        ${[1000, 2000, 3000, 4000]
+          .map((size) => `<option value="${size}" ${size === selection.sizeMetres ? 'selected' : ''}>${formatArea(size)}</option>`)
+          .join('')}
+      </select>
+
+      <div class="coordinate-grid">
+        <label>
+          <span>Latitude</span>
+          <input id="latitude" class="field-control" type="number" step="0.000001" value="${selection.latitude.toFixed(7)}" />
+        </label>
+        <label>
+          <span>Longitude</span>
+          <input id="longitude" class="field-control" type="number" step="0.000001" value="${selection.longitude.toFixed(7)}" />
+        </label>
+      </div>
+
+      <button id="focusArea" class="secondary-action" type="button">Center map on selection</button>
+    </section>
+
+    <section class="workflow-section compact">
+      <div class="selection-summary">
+        <span>Selected output area</span>
+        <strong id="selectedAreaLabel">${formatArea(selection.sizeMetres)}</strong>
+        <small id="bboxLabel">${formatBbox(selection)}</small>
+      </div>
+    </section>
+
+    <button id="generate" class="generate-button" type="button">
+      <span>▲</span>
+      <span><strong>Generate Area</strong><small>Fetch OSM and compile canonical geometry</small></span>
+    </button>
+
+    <div id="status" class="status-card ${message?.type ?? 'idle'}">
+      <strong>${message?.type === 'error' ? 'Generation failed' : 'Ready to generate'}</strong>
+      <span>${message?.text ?? 'No road or terrain calculation runs until Generate Area is pressed.'}</span>
+    </div>
+
+    <section class="workflow-section output-section">
+      <h3>Output settings</h3>
+      <label class="field-label">Resolution</label>
+      <div class="readonly-control">Adaptive grid · approximately 12.5 m spacing</div>
+      <label class="check-row"><input type="checkbox" checked disabled /> Include OSM road features</label>
+      <p class="muted-note">Real elevation data is not enabled yet. Terrain remains an explicit procedural preview.</p>
+    </section>
+  `, `
+    <div class="map-tabs">
+      <button class="map-tab active" type="button">◉ 2D Map</button>
+      <button class="map-tab" type="button" disabled>▰ 3D Preview</button>
+      <button class="map-tab" type="button" disabled>◇ Cesium Preview</button>
+    </div>
+    <div class="map-hint">Click map to choose centre · <strong id="mapAreaLabel">${formatArea(selection.sizeMetres)}</strong></div>
+  `);
+
+  selectionRenderer = createAreaSelectionRenderer('cesiumContainer', selection, (nextSelection) => {
+    selection = nextSelection;
+    syncSelectionControls();
+  });
+
+  const areaSize = requireElement<HTMLSelectElement>('#areaSize');
+  const latitude = requireElement<HTMLInputElement>('#latitude');
+  const longitude = requireElement<HTMLInputElement>('#longitude');
+  const focusArea = requireElement<HTMLButtonElement>('#focusArea');
+  const generate = requireElement<HTMLButtonElement>('#generate');
+
+  areaSize.addEventListener('change', () => {
+    selectionRenderer?.setSize(Number(areaSize.value));
+  });
+
+  const applyCoordinates = (): void => {
+    const nextLatitude = Number(latitude.value);
+    const nextLongitude = Number(longitude.value);
+    if (!Number.isFinite(nextLatitude) || !Number.isFinite(nextLongitude)) {
+      setStatus('error', 'Coordinates must be valid numbers.');
+      return;
+    }
+    selectionRenderer?.setCenter(nextLongitude, nextLatitude);
+    setStatus('idle', 'Selection updated. Press Generate Area when ready.');
+  };
+
+  latitude.addEventListener('change', applyCoordinates);
+  longitude.addEventListener('change', applyCoordinates);
+  focusArea.addEventListener('click', () => selectionRenderer?.focusSelection());
+  generate.addEventListener('click', () => void generateSelectedArea());
 }
 
-const manifest = buildSceneManifest(scene);
-const terrain = manifest.meshes.find((mesh) => mesh.role === 'terrain');
-const road = manifest.meshes.find((mesh) => mesh.role === 'road');
-const coordinateLabel = `${scene.anchor.latitude.toFixed(7)}, ${scene.anchor.longitude.toFixed(7)}`;
-const sourceIsLive = osmStats !== null;
+async function generateSelectedArea(): Promise<void> {
+  if (!selectionRenderer) return;
+  selection = selectionRenderer.getSelection();
+  const generateButton = requireElement<HTMLButtonElement>('#generate');
+  generateButton.disabled = true;
+  generateButton.classList.add('busy');
+  setStatus('working', 'Downloading OpenStreetMap data for the selected square…');
 
-app.innerHTML = `
-  <main class="shell">
-    <header>
-      <div>
-        <p class="eyebrow">TriWorld stable · 2 km area test</p>
-        <h1>${sourceIsLive ? 'Larger real area. Same canonical pipeline.' : 'OSM fallback active.'}</h1>
-        <p class="lede">${sourceIsLive
-          ? `Driveable OpenStreetMap ways inside a 2 × 2 km site at <strong>${coordinateLabel}</strong> are converted into the same local ENU / Z-up triangle buffers intended for BeamNG.`
-          : `The live OSM request failed, so the previous synthetic diagnostic scene is shown. <strong>${escapeHtml(sourceError ?? '')}</strong>`}</p>
-      </div>
-      <div class="stats">
-        <span>${manifest.vertices.toLocaleString()} vertices</span>
-        <span>${manifest.triangles.toLocaleString()} triangles</span>
-        <span class="good">2 KM TEST</span>
-        <span class="${sourceIsLive ? 'good' : 'bad'}">${sourceIsLive ? 'LIVE OSM ROADS' : 'FALLBACK'}</span>
-        <span class="${manifest.validation.valid ? 'good' : 'bad'}">${manifest.validation.valid ? 'VALID' : 'INVALID'}</span>
-      </div>
-    </header>
+  try {
+    await nextPaint();
+    const result = await buildOsmScene(selection);
+    renderGeneratedMode(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown generation error';
+    generateButton.disabled = false;
+    generateButton.classList.remove('busy');
+    setStatus('error', message);
+  }
+}
 
-    <section class="panel">
-      <div class="viewport-card">
-        <div id="cesiumContainer"></div>
-        <div class="location-badge">
-          <span>Geographic anchor</span>
-          <strong>${coordinateLabel}</strong>
-        </div>
-        <div class="viewport-badge">Canonical mesh hash <strong>${manifest.hash}</strong></div>
-      </div>
+function renderGeneratedMode(result: OsmSceneResult): void {
+  destroyRenderers();
+  generatedScene = result.scene;
+  generatedManifest = buildSceneManifest(result.scene);
 
-      <aside>
+  const manifest = generatedManifest;
+  const terrain = manifest.meshes.find((mesh) => mesh.role === 'terrain');
+  const road = manifest.meshes.find((mesh) => mesh.role === 'road');
+  const coordinateLabel = `${result.scene.anchor.latitude.toFixed(7)}, ${result.scene.anchor.longitude.toFixed(7)}`;
+
+  app.innerHTML = renderShell(`
+    ${renderBrand()}
+    <div class="mode-tabs" aria-label="Job mode">
+      <button class="mode-tab active" type="button">▣ Single Area</button>
+      <button class="mode-tab" type="button" disabled>▦ Batch Job</button>
+    </div>
+
+    <section class="workflow-section result-heading">
+      <div class="section-title-row">
+        <span class="step-number complete">✓</span>
         <div>
-          <p class="section-label">CanonicalScene</p>
-          <h2>${scene.id}</h2>
+          <h2>Area generated</h2>
+          <p>The selected square has been fetched and compiled.</p>
         </div>
-
-        <dl>
-          <div><dt>Location</dt><dd>${coordinateLabel}</dd></div>
-          <div><dt>Road source</dt><dd>${sourceIsLive ? 'OSM API v0.6' : 'Synthetic fallback'}</dd></div>
-          <div><dt>Terrain source</dt><dd>${sourceIsLive ? 'Procedural preview' : 'Synthetic preview'}</dd></div>
-          <div><dt>Frame</dt><dd>ENU / Z-up</dd></div>
-          <div><dt>Area</dt><dd>${sourceIsLive ? '2,000 × 2,000 m' : formatBounds()}</dd></div>
-          <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
-          <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
-          ${osmStats ? `<div><dt>OSM ways</dt><dd>${osmStats.waysImported}</dd></div>` : ''}
-          ${osmStats ? `<div><dt>Road length</dt><dd>${(osmStats.totalLengthMetres / 1000).toFixed(2)} km</dd></div>` : ''}
-        </dl>
-
-        ${renderRoadNames(osmStats)}
-
-        <p class="section-label control-heading">Map context</p>
-        <div class="controls">
-          <label><input id="map" type="checkbox" checked /> Real OSM map</label>
-          <label class="range-label">
-            <span>Map opacity</span>
-            <input id="mapOpacity" type="range" min="0" max="100" value="72" />
-          </label>
-        </div>
-
-        <p class="section-label control-heading">Canonical layers</p>
-        <div class="controls">
-          <label><input id="terrain" type="checkbox" checked /> Terrain preview</label>
-          <label><input id="road" type="checkbox" checked /> OSM road mesh</label>
-          <label><input id="wire" type="checkbox" checked /> Triangle edges</label>
-          <label><input id="points" type="checkbox" /> Canonical vertices</label>
-        </div>
-
-        <div class="buttons">
-          <button id="localView" type="button">Local triangle view</button>
-          <button id="mapView" type="button">Map overview</button>
-          <button id="download" type="button" class="primary">Download scene JSON</button>
-        </div>
-
-        <div class="validation ${manifest.validation.valid ? 'valid' : 'invalid'}">
-          <strong>${manifest.validation.valid ? 'Geometry validation passed' : 'Geometry validation failed'}</strong>
-          <span>${manifest.validation.valid
-            ? sourceIsLive
-              ? 'Road plan geometry is compiled from current OSM data. The elevation surface is still an explicitly labelled procedural preview.'
-              : 'Synthetic fallback geometry contains no invalid indices or degenerate faces.'
-            : manifest.validation.errors.slice(0, 3).join(' · ')}</span>
-        </div>
-      </aside>
+      </div>
+      <button id="changeArea" class="secondary-action" type="button">Change selected area</button>
     </section>
-  </main>`;
 
-const renderer = createTriWorldRenderer('cesiumContainer', scene);
-const mapToggle = requireElement<HTMLInputElement>('#map');
-const mapOpacity = requireElement<HTMLInputElement>('#mapOpacity');
-const terrainToggle = requireElement<HTMLInputElement>('#terrain');
-const roadToggle = requireElement<HTMLInputElement>('#road');
-const wireToggle = requireElement<HTMLInputElement>('#wire');
-const pointToggle = requireElement<HTMLInputElement>('#points');
-const localViewButton = requireElement<HTMLButtonElement>('#localView');
-const mapViewButton = requireElement<HTMLButtonElement>('#mapView');
-const downloadButton = requireElement<HTMLButtonElement>('#download');
+    <section class="result-stats">
+      <div><span>Area</span><strong>${formatArea(selection.sizeMetres)}</strong></div>
+      <div><span>OSM ways</span><strong>${result.stats.waysImported.toLocaleString()}</strong></div>
+      <div><span>Road length</span><strong>${(result.stats.totalLengthMetres / 1000).toFixed(2)} km</strong></div>
+      <div><span>Triangles</span><strong>${manifest.triangles.toLocaleString()}</strong></div>
+    </section>
 
-renderer.setMapOpacity(Number(mapOpacity.value) / 100);
-mapToggle.addEventListener('change', () => renderer.setMapVisible(mapToggle.checked));
-mapOpacity.addEventListener('input', () => renderer.setMapOpacity(Number(mapOpacity.value) / 100));
-terrainToggle.addEventListener('change', () => renderer.setTerrainVisible(terrainToggle.checked));
-roadToggle.addEventListener('change', () => renderer.setRoadVisible(roadToggle.checked));
-wireToggle.addEventListener('change', () => renderer.setWireframeVisible(wireToggle.checked));
-pointToggle.addEventListener('change', () => renderer.setVerticesVisible(pointToggle.checked));
-localViewButton.addEventListener('click', () => renderer.resetCamera());
-mapViewButton.addEventListener('click', () => renderer.showMapOverview());
-downloadButton.addEventListener('click', downloadScene);
-window.addEventListener('beforeunload', () => renderer.destroy(), { once: true });
+    <section class="workflow-section compact">
+      <h3>Generated data</h3>
+      <dl class="result-list">
+        <div><dt>Centre</dt><dd>${coordinateLabel}</dd></div>
+        <div><dt>Terrain</dt><dd>${terrain?.vertices ?? 0} v / ${terrain?.triangles ?? 0} t</dd></div>
+        <div><dt>Road mesh</dt><dd>${road?.vertices ?? 0} v / ${road?.triangles ?? 0} t</dd></div>
+        <div><dt>Mesh hash</dt><dd>${manifest.hash}</dd></div>
+      </dl>
+      ${renderRoadNames(result.stats)}
+    </section>
+
+    <section class="workflow-section compact">
+      <h3>Preview layers</h3>
+      <label class="check-row"><input id="map" type="checkbox" checked /> OpenStreetMap</label>
+      <label class="range-row"><span>Map opacity</span><input id="mapOpacity" type="range" min="0" max="100" value="72" /></label>
+      <label class="check-row"><input id="terrain" type="checkbox" checked /> Procedural terrain</label>
+      <label class="check-row"><input id="road" type="checkbox" checked /> OSM road mesh</label>
+      <label class="check-row"><input id="wire" type="checkbox" checked /> Triangle edges</label>
+      <label class="check-row"><input id="points" type="checkbox" /> Canonical vertices</label>
+    </section>
+
+    <button id="download" class="generate-button" type="button">
+      <span>↓</span>
+      <span><strong>Download scene JSON</strong><small>Canonical scene and validation manifest</small></span>
+    </button>
+
+    <div class="status-card ${manifest.validation.valid ? 'success' : 'error'}">
+      <strong>${manifest.validation.valid ? 'Geometry validation passed' : 'Geometry validation failed'}</strong>
+      <span>${manifest.validation.valid
+        ? 'OSM road plan geometry is real. Elevation is still a procedural preview.'
+        : escapeHtml(manifest.validation.errors.slice(0, 3).join(' · '))}</span>
+    </div>
+  `, `
+    <div class="map-tabs">
+      <button id="mapView" class="map-tab active" type="button">◉ 2D Map</button>
+      <button id="localView" class="map-tab" type="button">▰ 3D Preview</button>
+      <button class="map-tab" type="button" disabled>◇ Cesium Preview</button>
+    </div>
+    <div class="map-hint generated">Generated ${formatArea(selection.sizeMetres)} · ${result.stats.waysImported} OSM ways</div>
+  `);
+
+  sceneRenderer = createTriWorldRenderer('cesiumContainer', result.scene);
+  sceneRenderer.showMapOverview();
+  wireGeneratedControls();
+}
+
+function wireGeneratedControls(): void {
+  if (!sceneRenderer) return;
+
+  const mapToggle = requireElement<HTMLInputElement>('#map');
+  const mapOpacity = requireElement<HTMLInputElement>('#mapOpacity');
+  const terrainToggle = requireElement<HTMLInputElement>('#terrain');
+  const roadToggle = requireElement<HTMLInputElement>('#road');
+  const wireToggle = requireElement<HTMLInputElement>('#wire');
+  const pointToggle = requireElement<HTMLInputElement>('#points');
+  const localViewButton = requireElement<HTMLButtonElement>('#localView');
+  const mapViewButton = requireElement<HTMLButtonElement>('#mapView');
+  const changeAreaButton = requireElement<HTMLButtonElement>('#changeArea');
+  const downloadButton = requireElement<HTMLButtonElement>('#download');
+
+  sceneRenderer.setMapOpacity(Number(mapOpacity.value) / 100);
+  mapToggle.addEventListener('change', () => sceneRenderer?.setMapVisible(mapToggle.checked));
+  mapOpacity.addEventListener('input', () => sceneRenderer?.setMapOpacity(Number(mapOpacity.value) / 100));
+  terrainToggle.addEventListener('change', () => sceneRenderer?.setTerrainVisible(terrainToggle.checked));
+  roadToggle.addEventListener('change', () => sceneRenderer?.setRoadVisible(roadToggle.checked));
+  wireToggle.addEventListener('change', () => sceneRenderer?.setWireframeVisible(wireToggle.checked));
+  pointToggle.addEventListener('change', () => sceneRenderer?.setVerticesVisible(pointToggle.checked));
+
+  localViewButton.addEventListener('click', () => {
+    sceneRenderer?.resetCamera();
+    setActiveMapTab(localViewButton);
+  });
+  mapViewButton.addEventListener('click', () => {
+    sceneRenderer?.showMapOverview();
+    setActiveMapTab(mapViewButton);
+  });
+  changeAreaButton.addEventListener('click', () => renderSelectionMode({ type: 'info', text: 'Previous result cleared. Select a new area and generate again.' }));
+  downloadButton.addEventListener('click', downloadScene);
+}
+
+function renderShell(sidebar: string, mapOverlay: string): string {
+  return `
+    <main class="mapng-shell">
+      <aside class="sidebar">${sidebar}</aside>
+      <section class="map-workspace">
+        <div id="cesiumContainer"></div>
+        ${mapOverlay}
+        <div class="map-attribution-note">OpenStreetMap map context · selection only until Generate Area</div>
+      </section>
+    </main>`;
+}
+
+function renderBrand(): string {
+  return `
+    <div class="brand-row">
+      <div class="brand-mark">▲</div>
+      <div><strong>TriWorld</strong><span>BeamNG real-world terrain toolkit</span></div>
+      <button class="help-button" type="button" title="TriWorld area workflow">?</button>
+    </div>`;
+}
+
+function renderRoadNames(stats: OsmSceneStats): string {
+  if (stats.namedRoads.length === 0) return '';
+  const visibleNames = stats.namedRoads.slice(0, 10);
+  const remainder = stats.namedRoads.length - visibleNames.length;
+  return `
+    <div class="road-list">
+      <span>Named OSM roads</span>
+      <div>${visibleNames.map((name) => `<small>${escapeHtml(name)}</small>`).join('')}</div>
+      ${remainder > 0 ? `<em>+ ${remainder} more</em>` : ''}
+    </div>`;
+}
+
+function syncSelectionControls(): void {
+  const latitude = document.querySelector<HTMLInputElement>('#latitude');
+  const longitude = document.querySelector<HTMLInputElement>('#longitude');
+  const areaSize = document.querySelector<HTMLSelectElement>('#areaSize');
+  const selectedAreaLabel = document.querySelector<HTMLElement>('#selectedAreaLabel');
+  const mapAreaLabel = document.querySelector<HTMLElement>('#mapAreaLabel');
+  const bboxLabel = document.querySelector<HTMLElement>('#bboxLabel');
+
+  if (latitude) latitude.value = selection.latitude.toFixed(7);
+  if (longitude) longitude.value = selection.longitude.toFixed(7);
+  if (areaSize) areaSize.value = String(selection.sizeMetres);
+  if (selectedAreaLabel) selectedAreaLabel.textContent = formatArea(selection.sizeMetres);
+  if (mapAreaLabel) mapAreaLabel.textContent = formatArea(selection.sizeMetres);
+  if (bboxLabel) bboxLabel.textContent = formatBbox(selection);
+}
+
+function setStatus(type: 'idle' | 'working' | 'error', text: string): void {
+  const status = document.querySelector<HTMLElement>('#status');
+  if (!status) return;
+  status.className = `status-card ${type}`;
+  const title = status.querySelector('strong');
+  const detail = status.querySelector('span');
+  if (title) title.textContent = type === 'working' ? 'Generating selected area' : type === 'error' ? 'Generation failed' : 'Ready to generate';
+  if (detail) detail.textContent = text;
+}
+
+function setActiveMapTab(active: HTMLButtonElement): void {
+  document.querySelectorAll<HTMLButtonElement>('.map-tab').forEach((button) => button.classList.toggle('active', button === active));
+}
 
 function downloadScene(): void {
-  const blob = new Blob([serializeScene(scene, manifest)], { type: 'application/json' });
+  if (!generatedScene || !generatedManifest) return;
+  const blob = new Blob([serializeScene(generatedScene, generatedManifest)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${scene.id}-${manifest.hash}.json`;
+  link.download = `${generatedScene.id}-${generatedManifest.hash}.json`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 }
 
-function renderRoadNames(stats: OsmSceneStats | null): string {
-  if (!stats || stats.namedRoads.length === 0) return '';
-  const visibleNames = stats.namedRoads.slice(0, 12);
-  const remainder = stats.namedRoads.length - visibleNames.length;
-  return `
-    <div class="road-list">
-      <p class="section-label">Named OSM roads</p>
-      <div>${visibleNames.map((name) => `<span>${escapeHtml(name)}</span>`).join('')}</div>
-      ${remainder > 0 ? `<small>+ ${remainder} more</small>` : ''}
-    </div>`;
+function destroyRenderers(): void {
+  selectionRenderer?.destroy();
+  sceneRenderer?.destroy();
+  selectionRenderer = null;
+  sceneRenderer = null;
 }
 
-function formatBounds(): string {
-  const { min, max } = manifest.bounds;
-  const width = max[0] - min[0];
-  const depth = max[1] - min[1];
-  const height = max[2] - min[2];
-  return `${width.toFixed(0)} × ${depth.toFixed(0)} × ${height.toFixed(1)}`;
+function formatArea(sizeMetres: number): string {
+  const kilometres = sizeMetres / 1000;
+  const label = Number.isInteger(kilometres) ? kilometres.toFixed(0) : kilometres.toFixed(1);
+  return `${label} × ${label} km`;
+}
+
+function formatBbox(area: AreaSelection): string {
+  return selectionToBbox(area).map((value) => value.toFixed(5)).join(', ');
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 function escapeHtml(value: string): string {
