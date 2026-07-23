@@ -1,9 +1,16 @@
 export interface BeamNGTerrainArtifact {
   version: number;
   size: number;
+  squareSize: number;
+  maxHeight: number;
+  heightScale: number;
+  terrainPosition: [number, number, number];
   heightMapU16: Uint16Array;
   layerMapU8: Uint8Array;
   materialNames: readonly string[];
+  minimumDecodedElevation: number;
+  maximumDecodedElevation: number;
+  controlPoints?: Record<string, { unquantized?: number; decoded: number }>;
 }
 
 export interface BeamNGTargetInfo {
