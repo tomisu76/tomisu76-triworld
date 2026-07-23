@@ -124,7 +124,11 @@ export function generateLevelPackageFiles(
   ];
 
   if (options.extraMarkers) {
-    itemObjects.push(...options.extraMarkers as Array<Record<string, unknown>>);
+    itemObjects.push(
+      ...options.extraMarkers.map(
+        (marker) => marker as unknown as Record<string, unknown>,
+      ),
+    );
   }
   itemObjects.push(...extraObjects);
 
