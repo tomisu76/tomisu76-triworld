@@ -1,0 +1,57 @@
+name: BeamNG V4 Gate 3
+
+on:
+  push:
+    branches:
+      - feature/beamng-v4-road-terrain-gate3
+  pull_request:
+    paths:
+      - 'src/beamng-v4/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/beamng-v4-gate3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build application
+        run: npm run build
+
+      - name: Run Gate 3 acceptance tests
+        run: npm run test:gate3
+
+      - name: Build BeamNG Gate 3 ZIP
+        run: npm run build:gate3
+
+      - name: Verify generated artifacts
+        run: |
+          test -s dist/triworld_v4_gate3_road_loop.zip
+          test -s dist/triworld_v4_gate3_road_loop.manifest.json
+
+      - name: Upload Gate 3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: triworld-v4-gate3-road-loop
+          path: |
+            dist/triworld_v4_gate3_road_loop.zip
+            dist/triworld_v4_gate3_road_loop.manifest.json
+          if-no-files-found: error
+          retention-days: 14
