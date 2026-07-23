@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { buildBanovceRealWorldTerrain } from './gis-terrain';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import { generateLevelPackageFiles } from './level-generator';
-import { buildMountainLoopRoadTerrain } from './road-terrain';
+import { buildMountainLoopRoadTerrain } from './road-terrain-gate3';
 import { buildBeamNgZipPackage } from './zip-builder';
 
 async function main(): Promise<void> {
