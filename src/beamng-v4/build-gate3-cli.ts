@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   const acceptance = {
     realDemUsed: sourceTerrain.isRealDem,
     realRoadAlignmentUsed: road.sourceType === 'osm-api-v0.6',
-    syntheticProductionFallbackUsed: false,
+    noSyntheticProductionFallbackUsed: true,
     realOrthophotoUsed: isRealSatellite,
     roadPointCount: road.pointCount >= 2,
     roadSamplesProcessed: corridor.stats.roadStationCount > 0,
