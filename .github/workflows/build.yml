@@ -30,7 +30,19 @@ jobs:
         if: steps.tests.outcome == 'failure'
         run: exit 1
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        id: typecheck
+        continue-on-error: true
+        run: npx tsc --noEmit > typecheck.log 2>&1
+      - name: Upload typecheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-road-typecheck
+          path: typecheck.log
+          if-no-files-found: error
+      - name: Enforce typecheck result
+        if: steps.typecheck.outcome == 'failure'
+        run: exit 1
       - name: Web production build
         run: npx vite build
       - name: BeamNG road-first ZIP
