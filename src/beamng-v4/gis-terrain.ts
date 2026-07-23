@@ -1,7 +1,7 @@
 /**
  * GIS Real-World Terrain Generator — TriWorld V4 Gate 1 & Gate 2
  * Generates native BeamNG terrain for Bánovce nad Bebravou region using real global DEM raster data
- * (Copernicus / AWS Terrarium 30m DEM elevation tiles).
+ * (Copernicus / AWS Terrarium 30m DEM elevation tiles) with smooth 2D bilinear interpolation.
  */
 
 import { PNG } from 'pngjs';
@@ -23,6 +23,7 @@ export interface GisTerrainResult {
   scannedMinElevation: number;
   scannedMaxElevation: number;
   isRealDem: boolean;
+  sampleElevation: (xMetres: number, yMetres: number) => number;
 }
 
 /**
@@ -49,12 +50,6 @@ export function wgs84ToTileCoords(lon: number, lat: number, zoom: number = 14): 
  */
 export function decodeTerrariumElevation(r: number, g: number, b: number): number {
   return r * 256 + g + b / 256 - 32768;
-}
-
-interface LoadedTile {
-  tileX: number;
-  tileY: number;
-  png: PNG;
 }
 
 /**
@@ -89,7 +84,8 @@ export async function loadTerrariumDemTiles(tileCoordsList: Array<{ tileX: numbe
 }
 
 /**
- * Samples elevation from loaded Terrarium DEM tile map at WGS84 point.
+ * Samples elevation with 2D Bilinear Interpolation across 4 surrounding DEM pixels.
+ * Eliminates voxel / Minecraft terraced steps!
  */
 export function sampleLoadedDemElevation(lon: number, lat: number, tileMap: Map<string, PNG>, zoom: number = 14): number | null {
   const { tileX, tileY, fx, fy } = wgs84ToTileCoords(lon, lat, zoom);
@@ -97,15 +93,43 @@ export function sampleLoadedDemElevation(lon: number, lat: number, tileMap: Map<
   const png = tileMap.get(key);
   if (!png) return null;
 
-  const px = Math.min(255, Math.max(0, Math.floor(fx * 256)));
-  const py = Math.min(255, Math.max(0, Math.floor(fy * 256)));
+  const gx = fx * 256 - 0.5;
+  const gy = fy * 256 - 0.5;
 
-  const idx = (py * 256 + px) * 4;
-  const r = png.data[idx];
-  const g = png.data[idx + 1];
-  const b = png.data[idx + 2];
+  const x0 = Math.floor(gx);
+  const y0 = Math.floor(gy);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
 
-  return decodeTerrariumElevation(r, g, b);
+  const rx = gx - x0;
+  const ry = gy - y0;
+
+  const getPixelElev = (px: number, py: number): number => {
+    let tX = tileX;
+    let tY = tileY;
+    let pX = px;
+    let pY = py;
+
+    if (pX < 0) { tX--; pX += 256; }
+    if (pX >= 256) { tX++; pX -= 256; }
+    if (pY < 0) { tY--; pY += 256; }
+    if (pY >= 256) { tY++; pY -= 256; }
+
+    const targetPng = tileMap.get(`${tX}_${tY}`) ?? png;
+    const clampedX = Math.min(255, Math.max(0, pX));
+    const clampedY = Math.min(255, Math.max(0, pY));
+    const idx = (clampedY * 256 + clampedX) * 4;
+    return decodeTerrariumElevation(targetPng.data[idx], targetPng.data[idx + 1], targetPng.data[idx + 2]);
+  };
+
+  const e00 = getPixelElev(x0, y0);
+  const e10 = getPixelElev(x1, y0);
+  const e01 = getPixelElev(x0, y1);
+  const e11 = getPixelElev(x1, y1);
+
+  const e0 = e00 * (1 - rx) + e10 * rx;
+  const e1 = e01 * (1 - rx) + e11 * rx;
+  return e0 * (1 - ry) + e1 * ry;
 }
 
 /**
@@ -186,6 +210,12 @@ export function buildBanovceRealWorldTerrain(config: Partial<GisTerrainConfig> =
     materialNames: ['triworld_v4_ground'],
   };
 
+  const sampleElevation = (xMetres: number, yMetres: number): number => {
+    const c = Math.max(0, Math.min(size - 1, Math.round(xMetres / squareSize)));
+    const r = Math.max(0, Math.min(size - 1, Math.round((size - 1 - yMetres / squareSize))));
+    return rawElevations[r * size + c];
+  };
+
   return {
     artifact,
     transformer,
@@ -193,6 +223,7 @@ export function buildBanovceRealWorldTerrain(config: Partial<GisTerrainConfig> =
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem: false,
+    sampleElevation,
   };
 }
 
@@ -208,7 +239,6 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   const transformer = new GeodeticTransformer(centerWgs84, size * squareSize);
   const zoom = 14;
 
-  // Determine all tiles needed for the 1024m x 1024m local grid
   const corners = [
     { x: 0, y: 0 },
     { x: size * squareSize, y: 0 },
@@ -221,6 +251,11 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
     const wgs = transformer.localToWgs84({ ...corner, z: 0 });
     const { tileX, tileY } = wgs84ToTileCoords(wgs.longitude, wgs.latitude, zoom);
     neededTiles.push({ tileX, tileY });
+    // Also include adjacent 8 tiles to ensure seamless bilinear interpolation at boundaries
+    neededTiles.push({ tileX: tileX - 1, tileY });
+    neededTiles.push({ tileX: tileX + 1, tileY });
+    neededTiles.push({ tileX, tileY: tileY - 1 });
+    neededTiles.push({ tileX, tileY: tileY + 1 });
   }
 
   const tileMap = await loadTerrariumDemTiles(neededTiles, zoom);
@@ -282,6 +317,12 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
     materialNames: ['triworld_v4_ground'],
   };
 
+  const sampleElevation = (xMetres: number, yMetres: number): number => {
+    const c = Math.max(0, Math.min(size - 1, Math.round(xMetres / squareSize)));
+    const r = Math.max(0, Math.min(size - 1, Math.round((size - 1 - yMetres / squareSize))));
+    return rawElevations[r * size + c];
+  };
+
   return {
     artifact,
     transformer,
@@ -289,5 +330,6 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem,
+    sampleElevation,
   };
 }
