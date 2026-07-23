@@ -13,6 +13,7 @@ CENTER_LON = 18.34344407408825
 SIZE_M = 2000
 ZOOM = 14
 TILE_SIZE = 256
+TILE_CACHE = {}
 
 
 def fetch(url: str) -> bytes:
@@ -29,6 +30,14 @@ def tile_xy(lon: float, lat: float, zoom: int):
     return x, y
 
 
+def read_tile(tile_x: int, tile_y: int):
+    key = (tile_x, tile_y)
+    if key not in TILE_CACHE:
+        url = f"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{ZOOM}/{tile_x}/{tile_y}.png"
+        TILE_CACHE[key] = Image.open(io.BytesIO(fetch(url))).convert("RGB")
+    return TILE_CACHE[key]
+
+
 def terrarium_height(lon: float, lat: float) -> float:
     tx, ty = tile_xy(lon, lat, ZOOM)
     px = tx * TILE_SIZE - 0.5
@@ -38,20 +47,14 @@ def terrarium_height(lon: float, lat: float) -> float:
     fx = px - x0
     fy = py - y0
 
-    cache = {}
-
     def sample(global_x: int, global_y: int) -> float:
         tile_count = 2 ** ZOOM
         tile_x = (global_x // TILE_SIZE) % tile_count
         tile_y = max(0, min(tile_count - 1, global_y // TILE_SIZE))
-        key = (tile_x, tile_y)
-        if key not in cache:
-            url = f"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{ZOOM}/{tile_x}/{tile_y}.png"
-            image = Image.open(io.BytesIO(fetch(url))).convert("RGB")
-            cache[key] = image
+        image = read_tile(tile_x, tile_y)
         pixel_x = global_x % TILE_SIZE
         pixel_y = global_y % TILE_SIZE
-        r, g, b = cache[key].getpixel((pixel_x, pixel_y))
+        r, g, b = image.getpixel((pixel_x, pixel_y))
         return r * 256 + g + b / 256.0 - 32768.0
 
     h00 = sample(x0, y0)
@@ -93,8 +96,13 @@ def open_topodata(points):
     return [result["elevation"] for result in payload["results"]]
 
 
-def print_stats(name, values):
-    print(f"{name}: min={min(values):.3f} max={max(values):.3f} relief={max(values)-min(values):.3f} mean={statistics.mean(values):.3f}")
+def stats(values):
+    return {
+        "minimum": min(values),
+        "maximum": max(values),
+        "relief": max(values) - min(values),
+        "mean": statistics.mean(values),
+    }
 
 
 def inspect_wcs():
@@ -106,33 +114,49 @@ def inspect_wcs():
         if element.tag.endswith("CoverageId") or element.tag.endswith("Identifier"):
             if element.text and element.text.strip() not in identifiers:
                 identifiers.append(element.text.strip())
-    print("WCS coverage identifiers:", identifiers[:20])
+    return identifiers[:50]
 
 
 def main():
     points = make_points()
+    report = {
+        "selection": {"latitude": CENTER_LAT, "longitude": CENTER_LON, "sizeMetres": SIZE_M},
+        "points": [{"lat": p[0], "lon": p[1], "east": p[2], "north": p[3]} for p in points],
+    }
+
     mapzen = [terrarium_height(p[1], p[0]) for p in points]
-    meteo = open_meteo(points)
-    topo = open_topodata(points)
+    report["mapzenTerrariumDirect"] = {"values": mapzen, "stats": stats(mapzen)}
 
-    print_stats("Mapzen Terrarium direct", mapzen)
-    print_stats("OpenTopoData Mapzen", topo)
-    print_stats("Open-Meteo Copernicus GLO-90", meteo)
+    try:
+        meteo = open_meteo(points)
+        report["openMeteoCopernicusGlo90"] = {"values": meteo, "stats": stats(meteo)}
+        differences = [a - b for a, b in zip(mapzen, meteo)]
+        report["mapzenMinusCopernicus"] = {"values": differences, "stats": stats(differences)}
+    except Exception as error:
+        report["openMeteoError"] = repr(error)
 
-    mapzen_topo_errors = [a - b for a, b in zip(mapzen, topo)]
-    mapzen_meteo_errors = [a - b for a, b in zip(mapzen, meteo)]
-    print_stats("Mapzen direct - OpenTopoData", mapzen_topo_errors)
-    print_stats("Mapzen direct - Copernicus", mapzen_meteo_errors)
+    try:
+        topo = open_topodata(points)
+        report["openTopoDataMapzen"] = {"values": topo, "stats": stats(topo)}
+        differences = [a - b for a, b in zip(mapzen, topo)]
+        report["mapzenDirectMinusApi"] = {"values": differences, "stats": stats(differences)}
+    except Exception as error:
+        report["openTopoDataError"] = repr(error)
 
-    print("Center values:")
-    center = 12
-    print({
-        "mapzen_direct": mapzen[center],
-        "mapzen_api": topo[center],
-        "copernicus_glo90": meteo[center],
-    })
+    try:
+        report["slovakWcsCoverageIdentifiers"] = inspect_wcs()
+    except Exception as error:
+        report["slovakWcsError"] = repr(error)
 
-    inspect_wcs()
+    with open("elevation-verification.json", "w", encoding="utf-8") as output:
+        json.dump(report, output, indent=2)
+
+    print(json.dumps({
+        "mapzen": report["mapzenTerrariumDirect"]["stats"],
+        "copernicus": report.get("openMeteoCopernicusGlo90", {}).get("stats"),
+        "mapzenApi": report.get("openTopoDataMapzen", {}).get("stats"),
+        "wcs": report.get("slovakWcsCoverageIdentifiers", report.get("slovakWcsError")),
+    }, indent=2))
 
 
 if __name__ == "__main__":
