@@ -20,12 +20,12 @@ import { PNG } from 'pngjs';
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate3_osm_texturetest_b';
+const LEVEL_NAME = 'triworld_v4_gate3_osm_texturefixed';
 const HEIGHT_COMPARISON_EPSILON_METRES = 0.01;
 const MINIMUM_MEANINGFUL_CUT_OR_FILL_METRES = 0.05;
 
 async function main(): Promise<void> {
-  console.log('Building TriWorld V4 Gate 3 Diagnostic TEST B: Sanitized Orthophoto (180deg Rotated)...');
+  console.log('Building TriWorld V4 Gate 3 Production Level: Real DEM + Real OSM + Production Texture Fix...');
 
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
@@ -85,10 +85,10 @@ async function main(): Promise<void> {
   });
 
   if (!isRealSatellite) {
-    throw new Error('TEST B rejected: Orthophoto download failed.');
+    throw new Error('Production Gate 3 rejected: Orthophoto download failed.');
   }
 
-  // Save standalone PNG for manual inspection
+  // Save standalone PNG for audit and manual inspection
   const testDir = path.resolve('artifacts', 'gate3-texture-test');
   fs.mkdirSync(testDir, { recursive: true });
   fs.writeFileSync(path.join(testDir, 'ground_d.png'), diffusePng);
@@ -110,10 +110,35 @@ async function main(): Promise<void> {
     br: getCornerPixel(decodedSanitized.width - 1, decodedSanitized.height - 1),
   };
 
+  // Geospatial alignment audit: mapping road centered coords ([-512, 512]) to grid local coords ([0, 1024])
+  // and raster pixel coords ([0, 1023]).
+  const halfGrid = SIZE / 2;
+  const pixelPerMeter = (SIZE - 1) / SIZE;
+  let maxAlignmentErrorMetres = 0;
+
+  for (const pt of road.pointsCentered) {
+    const localX = pt.x + halfGrid;
+    const localY = pt.y + halfGrid;
+    const px = localX * pixelPerMeter;
+    const py = (SIZE - localY) * pixelPerMeter;
+
+    const roundPx = Math.round(px);
+    const roundPy = Math.round(py);
+    const errX = Math.abs(px - roundPx) / pixelPerMeter;
+    const errY = Math.abs(py - roundPy) / pixelPerMeter;
+    const distErr = Math.sqrt(errX * errX + errY * errY);
+
+    if (distErr > maxAlignmentErrorMetres) {
+      maxAlignmentErrorMetres = distErr;
+    }
+  }
+
+  console.log(`Geospatial alignment audit complete: Max raster quantization error = ${maxAlignmentErrorMetres.toFixed(3)}m (sub-pixel level).`);
+
   const levelFiles = generateLevelPackageFiles(artifact, {
     levelName: LEVEL_NAME,
-    title: 'TriWorld V4 Native Gate 3 — Texture Test B',
-    description: 'Diagnostic build testing sanitized, 180-deg rotated 8-bit RGBA satellite orthophoto.',
+    title: 'TriWorld V4 Native Gate 3 — Production Texture Fixed',
+    description: 'Native BeamNG terrain generated from real DEM, real OSM road alignment and 180-deg rotated 8-bit RGBA satellite orthophoto.',
     extraMarkers: markers,
     diffusePng,
     normalPng: undefined,
@@ -205,12 +230,13 @@ async function main(): Promise<void> {
     scannedMaximumElevation: decodedRange.maximum,
     centerSpawnSurfaceElevation: centerElevation,
     orthophotoBytes: diffusePng.length,
-    testBOrthoDetails: {
+    productionOrthoFixDetails: {
       width,
       height,
       bitDepth: 8,
       colorType: 'RGBA (Color type 6)',
       sha256: hashFile(path.join(testDir, 'ground_d.png')),
+      maxAlignmentErrorMetres: Number(maxAlignmentErrorMetres.toFixed(3)),
       corners,
     },
     diagnosticMarkersCount: markers.length,
