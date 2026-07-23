@@ -1,5 +1,13 @@
 import type { CanonicalMesh, CanonicalScene, Vec3 } from './core';
 import { loadElevationModel, type ElevationModel } from './elevation';
+import {
+  appendPreparedRoadMesh,
+  prepareRoadCorridor,
+  RoadTerrainIndex,
+  roadHeadingDegrees,
+  type PreparedRoadCorridor,
+  type RoadDesign,
+} from './road-terrain';
 
 export interface AreaSelection {
   longitude: number;
@@ -72,6 +80,7 @@ export interface OsmSceneStats {
   bbox: readonly [number, number, number, number];
   waysImported: number;
   roadSegments: number;
+  roadProfileStations: number;
   namedRoads: string[];
   totalLengthMetres: number;
   highwayCounts: Record<string, number>;
@@ -80,6 +89,10 @@ export interface OsmSceneStats {
   minimumElevationMetres: number;
   maximumElevationMetres: number;
   reliefMetres: number;
+  maximumRoadGradePercent: number;
+  maximumRoadBankPercent: number;
+  maximumTerrainCutMetres: number;
+  maximumTerrainFillMetres: number;
 }
 
 export interface OsmSceneResult {
@@ -125,13 +138,10 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     nodes.set(node.id, geographicToLocal(node.lon, node.lat, anchor));
   }
 
-  const positions: number[] = [];
-  const indices: number[] = [];
+  const preparedRoads: PreparedRoadCorridor[] = [];
   const namedRoads = new Set<string>();
   const highwayCounts: Record<string, number> = {};
   let waysImported = 0;
-  let roadSegments = 0;
-  let totalLengthMetres = 0;
 
   for (const element of payload.data.elements) {
     if (element.type !== 'way') continue;
@@ -140,6 +150,7 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     const highway = tags.highway;
 
     if (!highway || EXCLUDED_HIGHWAYS.has(highway) || tags.area === 'yes') continue;
+    if (tags.tunnel === 'yes' || tags.covered === 'yes') continue;
 
     const sourcePoints = way.nodes
       .map((nodeId) => nodes.get(nodeId))
@@ -154,14 +165,20 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     if (polylines.length === 0) continue;
 
     const width = roadWidth(tags);
+    const design = roadDesign(tags, width);
     let wayAdded = false;
 
-    for (const polyline of polylines) {
+    for (let partIndex = 0; partIndex < polylines.length; partIndex++) {
+      const polyline = polylines[partIndex];
       if (polyline.length < 2) continue;
-      const result = appendRoadStrip(positions, indices, polyline, width, elevation);
-      if (result.segments === 0) continue;
-      roadSegments += result.segments;
-      totalLengthMetres += result.length;
+      const road = prepareRoadCorridor(
+        `osm-${way.id}-${partIndex}`,
+        polyline,
+        elevation.sampleRelativeLocal,
+        design,
+      );
+      if (road.stations.length < 2 || road.lengthMetres < 0.05) continue;
+      preparedRoads.push(road);
       wayAdded = true;
     }
 
@@ -171,11 +188,30 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     if (tags.name) namedRoads.add(tags.name);
   }
 
-  if (roadSegments === 0) throw new Error('No driveable OSM highway geometry was found in the selected area.');
+  if (preparedRoads.length === 0) {
+    throw new Error('No driveable OSM highway geometry was found in the selected area.');
+  }
 
-  const terrainResult = buildTerrainMesh(halfExtentMetres, selection.sizeMetres, elevation);
+  const roadTerrain = new RoadTerrainIndex(preparedRoads);
+  const terrainResult = buildTerrainMesh(
+    halfExtentMetres,
+    selection.sizeMetres,
+    elevation,
+    roadTerrain,
+  );
+  const positions: number[] = [];
+  const indices: number[] = [];
+  let roadSegments = 0;
+  let totalLengthMetres = 0;
+
+  for (const preparedRoad of preparedRoads) {
+    const result = appendPreparedRoadMesh(positions, indices, preparedRoad);
+    roadSegments += result.segments;
+    totalLengthMetres += result.lengthMetres;
+  }
+
   const road: CanonicalMesh = {
-    id: 'roads-osm-live',
+    id: 'roads-osm-engineered',
     role: 'road',
     materialId: 'road-osm',
     positions,
@@ -184,7 +220,7 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
 
   const sizeLabel = `${Math.round(selection.sizeMetres)}m`;
   const scene: CanonicalScene = {
-    id: `triworld-osm-selected-${sizeLabel}-v02`,
+    id: `triworld-osm-selected-${sizeLabel}-v03`,
     schemaVersion: '0.1.0',
     coordinateSystem: {
       handedness: 'right',
@@ -194,11 +230,11 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     },
     anchor,
     materials: [
-      { id: 'terrain-dem', name: 'Real DEM terrain', color: [0.16, 0.42, 0.24, 1] },
-      { id: 'road-osm', name: 'OpenStreetMap roads', color: [1, 0.08, 0.58, 1] },
+      { id: 'terrain-dem', name: 'Road-conformed DMR terrain', color: [0.16, 0.42, 0.24, 1] },
+      { id: 'road-osm', name: 'Engineered OpenStreetMap roads', color: [1, 0.08, 0.58, 1] },
     ],
     meshes: [terrainResult.mesh, road],
-    spawns: [buildSpawn(positions, elevation)],
+    spawns: [buildSpawn(preparedRoads, elevation)],
   };
 
   return {
@@ -209,6 +245,7 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
       bbox,
       waysImported,
       roadSegments,
+      roadProfileStations: preparedRoads.reduce((sum, item) => sum + item.stations.length, 0),
       namedRoads: [...namedRoads].sort((a, b) => a.localeCompare(b)),
       totalLengthMetres,
       highwayCounts,
@@ -217,6 +254,10 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
       minimumElevationMetres: terrainResult.minimumElevationMetres,
       maximumElevationMetres: terrainResult.maximumElevationMetres,
       reliefMetres: terrainResult.maximumElevationMetres - terrainResult.minimumElevationMetres,
+      maximumRoadGradePercent: maximumRoadMetric(preparedRoads, 'maximumGrade') * 100,
+      maximumRoadBankPercent: maximumRoadMetric(preparedRoads, 'maximumBank') * 100,
+      maximumTerrainCutMetres: terrainResult.maximumCutMetres,
+      maximumTerrainFillMetres: terrainResult.maximumFillMetres,
     },
   };
 }
@@ -253,7 +294,14 @@ function buildTerrainMesh(
   halfExtentMetres: number,
   sizeMetres: number,
   elevation: ElevationModel,
-): { mesh: CanonicalMesh; minimumElevationMetres: number; maximumElevationMetres: number } {
+  roadTerrain: RoadTerrainIndex,
+): {
+  mesh: CanonicalMesh;
+  minimumElevationMetres: number;
+  maximumElevationMetres: number;
+  maximumCutMetres: number;
+  maximumFillMetres: number;
+} {
   const requestedIntervals = Math.round(sizeMetres / 12.5);
   const intervals = Math.max(40, Math.min(320, requestedIntervals));
   const size = intervals + 1;
@@ -262,16 +310,21 @@ function buildTerrainMesh(
   const indices: number[] = [];
   let minimumElevationMetres = Number.POSITIVE_INFINITY;
   let maximumElevationMetres = Number.NEGATIVE_INFINITY;
+  let maximumCutMetres = 0;
+  let maximumFillMetres = 0;
 
   for (let row = 0; row < size; row++) {
     for (let column = 0; column < size; column++) {
       const x = -halfExtentMetres + column * step;
       const y = -halfExtentMetres + row * step;
-      const absoluteElevation = elevation.sampleAbsoluteLocal(x, y);
-      const relativeElevation = absoluteElevation - elevation.anchorElevationMetres;
+      const baseRelativeElevation = elevation.sampleRelativeLocal(x, y);
+      const conformed = roadTerrain.sample(baseRelativeElevation, x, y);
+      const absoluteElevation = conformed.elevation + elevation.anchorElevationMetres;
       minimumElevationMetres = Math.min(minimumElevationMetres, absoluteElevation);
       maximumElevationMetres = Math.max(maximumElevationMetres, absoluteElevation);
-      positions.push(x, y, relativeElevation);
+      maximumCutMetres = Math.max(maximumCutMetres, conformed.cutMetres);
+      maximumFillMetres = Math.max(maximumFillMetres, conformed.fillMetres);
+      positions.push(x, y, conformed.elevation);
     }
   }
 
@@ -287,7 +340,7 @@ function buildTerrainMesh(
 
   return {
     mesh: {
-      id: `terrain-dem-${Math.round(sizeMetres)}m`,
+      id: `terrain-dem-road-conformed-${Math.round(sizeMetres)}m`,
       role: 'terrain',
       materialId: 'terrain-dem',
       positions,
@@ -295,56 +348,9 @@ function buildTerrainMesh(
     },
     minimumElevationMetres,
     maximumElevationMetres,
+    maximumCutMetres,
+    maximumFillMetres,
   };
-}
-
-function appendRoadStrip(
-  positions: number[],
-  indices: number[],
-  points: LocalPoint[],
-  width: number,
-  elevation: ElevationModel,
-): { segments: number; length: number } {
-  const startVertex = positions.length / 3;
-  const halfWidth = width / 2;
-  let length = 0;
-
-  for (let index = 0; index < points.length; index++) {
-    const previous = points[Math.max(0, index - 1)];
-    const current = points[index];
-    const next = points[Math.min(points.length - 1, index + 1)];
-    const tangentX = next.x - previous.x;
-    const tangentY = next.y - previous.y;
-    const tangentLength = Math.hypot(tangentX, tangentY) || 1;
-    const normalX = -tangentY / tangentLength;
-    const normalY = tangentX / tangentLength;
-    const z = elevation.sampleRelativeLocal(current.x, current.y) + 0.42;
-
-    positions.push(
-      current.x + normalX * halfWidth,
-      current.y + normalY * halfWidth,
-      z,
-      current.x - normalX * halfWidth,
-      current.y - normalY * halfWidth,
-      z,
-    );
-
-    if (index > 0) length += distance(points[index - 1], current);
-  }
-
-  let segments = 0;
-  for (let index = 0; index < points.length - 1; index++) {
-    const left = startVertex + index * 2;
-    const right = left + 1;
-    const nextLeft = left + 2;
-    const nextRight = left + 3;
-
-    if (distance(points[index], points[index + 1]) < 0.05) continue;
-    indices.push(left, right, nextRight, left, nextRight, nextLeft);
-    segments += 1;
-  }
-
-  return { segments, length };
 }
 
 function clipPolyline(points: LocalPoint[], closed: boolean, extent: number): LocalPoint[][] {
@@ -452,14 +458,90 @@ function roadWidth(tags: OsmTags): number {
   return Math.max(baseWidths[highway] ?? 5, laneWidth);
 }
 
-function buildSpawn(roadPositions: number[], elevation: ElevationModel): { id: string; position: Vec3; headingDegrees: number } {
-  if (roadPositions.length >= 6) {
-    const x = (roadPositions[0] + roadPositions[3]) / 2;
-    const y = (roadPositions[1] + roadPositions[4]) / 2;
-    const z = Math.max(roadPositions[2], roadPositions[5]) + 2.8;
-    return { id: 'spawn-osm-first-road', position: [x, y, z], headingDegrees: 0 };
+function roadDesign(tags: OsmTags, widthMetres: number): Partial<RoadDesign> & Pick<RoadDesign, 'widthMetres'> {
+  const highway = tags.highway;
+  const maximumGrades: Record<string, number> = {
+    motorway: 0.07,
+    motorway_link: 0.10,
+    trunk: 0.09,
+    trunk_link: 0.11,
+    primary: 0.11,
+    primary_link: 0.13,
+    secondary: 0.13,
+    secondary_link: 0.15,
+    tertiary: 0.15,
+    tertiary_link: 0.17,
+    residential: 0.18,
+    living_street: 0.18,
+    unclassified: 0.20,
+    service: 0.22,
+    track: 0.28,
+    road: 0.20,
+  };
+  const defaultSpeedsKmh: Record<string, number> = {
+    motorway: 100,
+    motorway_link: 50,
+    trunk: 80,
+    trunk_link: 50,
+    primary: 70,
+    primary_link: 45,
+    secondary: 60,
+    secondary_link: 40,
+    tertiary: 50,
+    tertiary_link: 35,
+    residential: 35,
+    living_street: 20,
+    unclassified: 40,
+    service: 25,
+    track: 20,
+    road: 35,
+  };
+  const speedKmh = parseSpeedKmh(tags.maxspeed) ?? defaultSpeedsKmh[highway] ?? 40;
+  const majorRoad = ['motorway', 'trunk', 'primary', 'secondary'].includes(highway);
+
+  return {
+    widthMetres,
+    stationSpacingMetres: majorRoad ? 4 : 5,
+    maximumGrade: maximumGrades[highway] ?? 0.20,
+    maximumBank: majorRoad ? 0.05 : 0.04,
+    designSpeedMetresPerSecond: speedKmh / 3.6,
+    shoulderWidthMetres: majorRoad ? 2 : highway === 'track' ? 0.5 : 1.25,
+    minimumBlendWidthMetres: majorRoad ? 10 : 7,
+    maximumBlendWidthMetres: majorRoad ? 42 : 34,
+    surfaceRaiseMetres: highway === 'track' ? 0.06 : 0.12,
+    surfaceClearanceMetres: highway === 'track' ? 0.12 : 0.18,
+    terrainConform: tags.bridge !== 'yes' && tags.layer !== '1' && tags.layer !== '2',
+  };
+}
+
+function parseSpeedKmh(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return value.toLowerCase().includes('mph') ? parsed * 1.609344 : parsed;
+}
+
+function buildSpawn(
+  roads: readonly PreparedRoadCorridor[],
+  elevation: ElevationModel,
+): { id: string; position: Vec3; headingDegrees: number } {
+  const road = roads.find((candidate) => candidate.stations.length >= 2);
+  if (road) {
+    const station = road.stations[0];
+    return {
+      id: 'spawn-osm-first-road',
+      position: [station.x, station.y, station.z + 2.8],
+      headingDegrees: roadHeadingDegrees(road),
+    };
   }
   return { id: 'spawn-centre', position: [0, 0, elevation.sampleRelativeLocal(0, 0) + 3], headingDegrees: 0 };
+}
+
+function maximumRoadMetric(
+  roads: readonly PreparedRoadCorridor[],
+  metric: 'maximumGrade' | 'maximumBank',
+): number {
+  return roads.reduce((maximum, road) => Math.max(maximum, road[metric]), 0);
 }
 
 function deduplicatePoints(points: LocalPoint[]): LocalPoint[] {
