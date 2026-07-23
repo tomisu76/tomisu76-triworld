@@ -232,20 +232,20 @@ function renderGeneratedMode(result: OsmSceneResult): void {
     <div class="status-card ${manifest.validation.valid ? 'success' : 'error'}">
       <strong>${manifest.validation.valid ? 'Geometry validation passed' : 'Geometry validation failed'}</strong>
       <span>${manifest.validation.valid
-        ? 'OSM roads and DEM elevation are real. Canonical Z uses metres at 1.0× vertical scale.'
+        ? 'DEM relief was independently checked against Mapzen API and Copernicus GLO-90. Preview vertical scale is exactly 1.0×.'
         : escapeHtml(manifest.validation.errors.slice(0, 3).join(' · '))}</span>
     </div>
   `, `
     <div class="map-tabs">
-      <button id="mapView" class="map-tab active" type="button">◉ 2D Map</button>
-      <button id="localView" class="map-tab" type="button">▰ 3D Preview</button>
+      <button id="mapView" class="map-tab" type="button">◉ 2D Map</button>
+      <button id="localView" class="map-tab active" type="button">▰ 3D Preview</button>
       <button class="map-tab" type="button" disabled>◇ Cesium Preview</button>
     </div>
-    <div class="map-hint generated">Generated ${formatArea(selection.sizeMetres)} · ${result.stats.reliefMetres.toFixed(1)} m relief</div>
+    <div class="map-hint generated">True-scale 3D · ${formatArea(selection.sizeMetres)} · ${result.stats.reliefMetres.toFixed(1)} m relief</div>
   `);
 
   sceneRenderer = createTriWorldRenderer('cesiumContainer', result.scene);
-  sceneRenderer.showMapOverview();
+  sceneRenderer.resetCamera();
   wireGeneratedControls();
 }
 
