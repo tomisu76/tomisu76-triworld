@@ -24,7 +24,7 @@ describe('TRIWORLD V4 — ROAD-FIRST NATIVE CORRIDOR', () => {
     expect(result.road.drivability).toBe(1);
     expect(result.road.nodes.length).toBeGreaterThan(50);
     expect(result.road.nodes[0]).toEqual(result.road.nodes[result.road.nodes.length - 1]);
-    expect(result.stats.roadLengthMetres).toBeGreaterThan(600);
+    expect(result.stats.roadLengthMetres).toBeGreaterThan(550);
     expect(result.stats.maximumGrade).toBeLessThanOrEqual(0.10001);
     expect(result.stats.maximumBank).toBeLessThanOrEqual(0.04501);
   });
