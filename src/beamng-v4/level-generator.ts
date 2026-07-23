@@ -27,13 +27,15 @@ export interface LevelPackageFiles {
 }
 
 export function generateLevelPackageFiles(
-  artifact: Pick<BeamNGTerrainArtifact, 'size' | 'squareSize' | 'maxHeight' | 'materialNames'> & {
+  artifact: Pick<BeamNGTerrainArtifact, 'size' | 'squareSize' | 'maxHeight'> & {
+    materialNames?: readonly string[];
     controlPoints?: Record<string, { decoded: number }>;
   },
   options: LevelPackageOptions = {}
 ): LevelPackageFiles {
   const size = artifact.size;
   const half = (size * artifact.squareSize) / 2;
+  const materialNames = artifact.materialNames ?? ['triworld_v4_ground'];
   const defaultSpawnZ = artifact.controlPoints?.p256_256?.decoded
     ? artifact.controlPoints.p256_256.decoded + 3.0
     : 30.0;
@@ -42,7 +44,7 @@ export function generateLevelPackageFiles(
   const description = options.description ?? 'Native BeamNG terrain format validation level';
   const extraObjects = options.extraObjects ?? [];
   const hasRoadObject = extraObjects.some((object) => object.class === 'DecalRoad');
-  const needsRoadAssets = hasRoadObject || artifact.materialNames.includes('ASPHALT');
+  const needsRoadAssets = hasRoadObject || materialNames.includes('ASPHALT');
 
   const infoObj = {
     title,
@@ -139,7 +141,7 @@ export function generateLevelPackageFiles(
     heightMapItemSize: 2,
     layerMapSize: size,
     layerMapItemSize: 1,
-    materials: [...artifact.materialNames],
+    materials: [...materialNames],
   };
 
   const materialsJsonObj: Record<string, Record<string, unknown>> = {
@@ -162,7 +164,7 @@ export function generateLevelPackageFiles(
     },
   };
 
-  if (artifact.materialNames.includes('ASPHALT')) {
+  if (materialNames.includes('ASPHALT')) {
     materialsJsonObj.ASPHALT = {
       name: 'ASPHALT',
       class: 'TerrainMaterial',
