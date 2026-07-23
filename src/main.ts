@@ -45,7 +45,7 @@ function renderSelectionMode(message?: { type: 'error' | 'info'; text: string })
         <span class="step-number">1</span>
         <div>
           <h2>Select area</h2>
-          <p>Click anywhere on the map to move the orange processing square.</p>
+          <p>Move the map beneath the fixed selection square. The centre of the screen becomes the output centre.</p>
         </div>
       </div>
 
@@ -67,7 +67,7 @@ function renderSelectionMode(message?: { type: 'error' | 'info'; text: string })
         </label>
       </div>
 
-      <button id="focusArea" class="secondary-action" type="button">Center map on selection</button>
+      <button id="focusArea" class="secondary-action" type="button">Return map to entered coordinates</button>
     </section>
 
     <section class="workflow-section compact">
@@ -101,7 +101,14 @@ function renderSelectionMode(message?: { type: 'error' | 'info'; text: string })
       <button class="map-tab" type="button" disabled>▰ 3D Preview</button>
       <button class="map-tab" type="button" disabled>◇ Cesium Preview</button>
     </div>
-    <div class="map-hint">Click map to choose centre · <strong id="mapAreaLabel">${formatArea(selection.sizeMetres)}</strong></div>
+    <div class="map-hint">Drag the map under the fixed frame · <strong id="mapAreaLabel">${formatArea(selection.sizeMetres)}</strong></div>
+    <div class="fixed-area-selector" aria-hidden="true">
+      <div class="selector-crosshair"></div>
+      <div class="selector-label">
+        <strong id="fixedAreaLabel">${formatArea(selection.sizeMetres)}</strong>
+        <span id="selectorCoordinateLabel">${formatCoordinates(selection)}</span>
+      </div>
+    </div>
   `);
 
   selectionRenderer = createAreaSelectionRenderer('cesiumContainer', selection, (nextSelection) => {
@@ -267,7 +274,7 @@ function wireGeneratedControls(): void {
     sceneRenderer?.showMapOverview();
     setActiveMapTab(mapViewButton);
   });
-  changeAreaButton.addEventListener('click', () => renderSelectionMode({ type: 'info', text: 'Previous result cleared. Select a new area and generate again.' }));
+  changeAreaButton.addEventListener('click', () => renderSelectionMode({ type: 'info', text: 'Previous result cleared. Move the map beneath the fixed frame and generate again.' }));
   downloadButton.addEventListener('click', downloadScene);
 }
 
@@ -310,6 +317,8 @@ function syncSelectionControls(): void {
   const areaSize = document.querySelector<HTMLSelectElement>('#areaSize');
   const selectedAreaLabel = document.querySelector<HTMLElement>('#selectedAreaLabel');
   const mapAreaLabel = document.querySelector<HTMLElement>('#mapAreaLabel');
+  const fixedAreaLabel = document.querySelector<HTMLElement>('#fixedAreaLabel');
+  const selectorCoordinateLabel = document.querySelector<HTMLElement>('#selectorCoordinateLabel');
   const bboxLabel = document.querySelector<HTMLElement>('#bboxLabel');
 
   if (latitude) latitude.value = selection.latitude.toFixed(7);
@@ -317,6 +326,8 @@ function syncSelectionControls(): void {
   if (areaSize) areaSize.value = String(selection.sizeMetres);
   if (selectedAreaLabel) selectedAreaLabel.textContent = formatArea(selection.sizeMetres);
   if (mapAreaLabel) mapAreaLabel.textContent = formatArea(selection.sizeMetres);
+  if (fixedAreaLabel) fixedAreaLabel.textContent = formatArea(selection.sizeMetres);
+  if (selectorCoordinateLabel) selectorCoordinateLabel.textContent = formatCoordinates(selection);
   if (bboxLabel) bboxLabel.textContent = formatBbox(selection);
 }
 
@@ -358,6 +369,10 @@ function formatArea(sizeMetres: number): string {
   const kilometres = sizeMetres / 1000;
   const label = Number.isInteger(kilometres) ? kilometres.toFixed(0) : kilometres.toFixed(1);
   return `${label} × ${label} km`;
+}
+
+function formatCoordinates(area: AreaSelection): string {
+  return `${area.latitude.toFixed(6)}, ${area.longitude.toFixed(6)}`;
 }
 
 function formatBbox(area: AreaSelection): string {
