@@ -383,7 +383,7 @@ function buildFrames(points: readonly RoadPoint[]): Array<Pick<RoadStation, 'tan
 }
 
 function buildBanks(
-  frames: readonly Array<Pick<RoadStation, 'tangentX' | 'tangentY'>>,
+  frames: ReadonlyArray<Pick<RoadStation, 'tangentX' | 'tangentY'>>,
   distances: readonly number[],
   design: RoadDesign,
 ): number[] {
