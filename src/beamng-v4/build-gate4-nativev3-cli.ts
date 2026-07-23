@@ -8,15 +8,20 @@ import { fetchRealBanovceOrthophoto } from './ortho-generator';
 import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
 import { generateDiagnosticMarkers } from './diagnostic-markers';
 import {
-  generateRoadSurfaceMesh,
   exportRoadMeshToDae,
   generateAsphaltTexturePng,
   parseDaeVerticesAndAuditClearance,
+  type RoadSurfaceMeshResult,
 } from './road-mesh-exporter';
 import { buildBeamNgZipPackage } from './zip-builder';
 import { resampleSumoShapeGlobal, type SumoPlanStation } from '../pipeline-v3/sumo/SumoGeometryV3';
 import { designVerticalProfileV3 } from '../pipeline-v3/civil/designVerticalProfile';
 import { buildCorridorV3 } from '../pipeline-v3/corridor/buildCorridor';
+import type { ElevationModel } from '../elevation';
+import { buildEngineeredRoadMesh } from '../roads/road-mesh';
+import { getRoadDesignPolicy } from '../roads/road-design-policy';
+import { SpatialRoadIndex } from '../roads/spatial-road-index';
+import type { DesignedRoad } from '../roads/vertical-alignment';
 
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
@@ -74,6 +79,67 @@ function createStrictTerrainSampler(
     const z0 = z00 + (z10 - z00) * tx;
     const z1 = z01 + (z11 - z01) * tx;
     return z0 + (z1 - z0) * ty;
+  };
+}
+
+function adaptEngineeredMeshForDae(
+  engineered: ReturnType<typeof buildEngineeredRoadMesh>,
+  sampleTerrainElevation: (x: number, y: number) => number,
+  stationValues: readonly number[],
+  widthMetres: number,
+): RoadSurfaceMeshResult {
+  const positions = new Float32Array(engineered.mesh.positions.length);
+  const normals = new Float32Array(engineered.mesh.positions.length);
+  const uvs = new Float32Array((engineered.mesh.positions.length / 3) * 2);
+  let minimumClearance = Number.POSITIVE_INFINITY;
+  let maximumClearance = Number.NEGATIVE_INFINITY;
+  let totalClearance = 0;
+  let negativeCount = 0;
+  let maxAdjacentZJumpMetres = 0;
+
+  for (let vertex = 0; vertex < engineered.mesh.positions.length / 3; vertex++) {
+    const source = vertex * 3;
+    const x = engineered.mesh.positions[source] + SIZE / 2;
+    const y = engineered.mesh.positions[source + 1] + SIZE / 2;
+    const z = engineered.mesh.positions[source + 2];
+    positions[source] = x;
+    positions[source + 1] = y;
+    positions[source + 2] = z;
+    normals[source + 2] = 1;
+    uvs[vertex * 2] = vertex % 2;
+    uvs[vertex * 2 + 1] = stationValues[Math.floor(vertex / 2)] / 5;
+
+    const clearance = z - sampleTerrainElevation(x, y);
+    minimumClearance = Math.min(minimumClearance, clearance);
+    maximumClearance = Math.max(maximumClearance, clearance);
+    totalClearance += clearance;
+    if (clearance < 0) negativeCount++;
+  }
+
+  for (let station = 1; station < stationValues.length; station++) {
+    const previousZ = (positions[(station - 1) * 6 + 2] + positions[(station - 1) * 6 + 5]) / 2;
+    const currentZ = (positions[station * 6 + 2] + positions[station * 6 + 5]) / 2;
+    maxAdjacentZJumpMetres = Math.max(maxAdjacentZJumpMetres, Math.abs(currentZ - previousZ));
+  }
+
+  const vertexCount = positions.length / 3;
+  return {
+    positions,
+    normals,
+    uvs,
+    indices: new Uint32Array(engineered.mesh.indices),
+    vertexCount,
+    triangleCount: engineered.mesh.indices.length / 3,
+    segmentCount: engineered.segments,
+    lengthMetres: engineered.length,
+    widthMetres,
+    clearanceStats: {
+      minMetres: Number(minimumClearance.toFixed(3)),
+      maxMetres: Number(maximumClearance.toFixed(3)),
+      meanMetres: Number((totalClearance / vertexCount).toFixed(3)),
+      negativeCount,
+      maxAdjacentZJumpMetres: Number(maxAdjacentZJumpMetres.toFixed(3)),
+    },
   };
 }
 
@@ -187,7 +253,64 @@ async function main(): Promise<void> {
 
   // 5. Native Pipeline V3 Road Mesh Export
   const stations = corridor.v3Result.stations;
-  const roadMesh = generateRoadSurfaceMesh(road, sampleTerrainElevation, stations);
+  const designPolicy = getRoadDesignPolicy(road.highway);
+  const halfWidth = road.laneWidthMetres / 2;
+  const engineeredElevation: ElevationModel = {
+    source: 'Gate 4 working terrain',
+    zoom: 0,
+    anchorElevationMetres: 0,
+    sampleAbsoluteLocal: (x, y) => sampleTerrainElevation(x + SIZE / 2, y + SIZE / 2),
+    sampleRelativeLocal: (x, y) => sampleTerrainElevation(x + SIZE / 2, y + SIZE / 2),
+  };
+  const designedRoad: DesignedRoad = {
+    id: `osm-way-${road.wayId}-fragment-${road.fragmentIndex}`,
+    osmWayId: road.wayId,
+    highwayClass: road.highway,
+    bridge: false,
+    tunnel: false,
+    layer: 0,
+    stations: stations.map((station, index) => {
+      const previous = stations[Math.max(0, index - 1)];
+      const next = stations[Math.min(stations.length - 1, index + 1)];
+      const ds = next.station - previous.station;
+      return {
+        station: station.station,
+        x: station.x,
+        y: station.y,
+        groundZ: station.groundZ,
+        designZ: station.surfaceZ,
+        grade: ds > 0 ? (next.surfaceZ - previous.surfaceZ) / ds : 0,
+        tangentX: station.tangentX,
+        tangentY: station.tangentY,
+        normalX: station.normalX,
+        normalY: station.normalY,
+        leftX: station.x + station.normalX * halfWidth,
+        leftY: station.y + station.normalY * halfWidth,
+        rightX: station.x - station.normalX * halfWidth,
+        rightY: station.y - station.normalY * halfWidth,
+        roadWidth: road.laneWidthMetres,
+        shoulderWidth: designPolicy.shoulderWidth,
+        crossfall: designPolicy.crossfall,
+      };
+    }),
+    designPolicy,
+    maximumCut: corridor.stats.maximumCutMetres,
+    maximumFill: corridor.stats.maximumFillMetres,
+    totalCutVolumeEstimate: 0,
+    totalFillVolumeEstimate: 0,
+    verticalCurves: [],
+  };
+  const engineeredResult = buildEngineeredRoadMesh(
+    [designedRoad],
+    new SpatialRoadIndex(SIZE / 2, [designedRoad]),
+    engineeredElevation,
+  );
+  const roadMesh = adaptEngineeredMeshForDae(
+    engineeredResult,
+    sampleTerrainElevation,
+    stations.map((station) => station.station),
+    road.laneWidthMetres,
+  );
   const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
   const asphaltPng = generateAsphaltTexturePng(256);
 
