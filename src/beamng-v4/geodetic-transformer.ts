@@ -29,11 +29,11 @@ export interface GeodeticOrigin {
   sizeMetres: number;
 }
 
-// Bánovce nad Bebravou reference center (Slovakia, UTM Zone 34N)
+// Bánovce region target center location (WGS84)
 export const BANOVCE_ORIGIN_WGS84: Wgs84Point = {
-  longitude: 18.2575,
-  latitude: 48.7202,
-  altitude: 215.0, // Average town elevation in metres
+  longitude: 18.352620306978697,
+  latitude: 48.72566288876834,
+  altitude: 260.0, // Local elevation in metres
 };
 
 /**
