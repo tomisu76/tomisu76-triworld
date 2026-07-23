@@ -1,8 +1,8 @@
 const DEFAULT_BBOX = [
-  18.33663427170421,
-  48.72825915970341,
-  18.35025387647229,
-  48.737242271453326,
+  18.329824469320165,
+  48.723767603828456,
+  18.357063678856335,
+  48.74173382732828,
 ];
 
 export default async function handler(request, response) {
@@ -19,7 +19,7 @@ export default async function handler(request, response) {
     const upstream = await fetch(url, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'TriWorld/0.4 (+https://triworld.vercel.app; contact: tomisu76@gmail.com)',
+        'User-Agent': 'TriWorld/0.5 (+https://triworld.vercel.app; contact: tomisu76@gmail.com)',
       },
     });
 
@@ -58,7 +58,7 @@ function parseBbox(value) {
 
   const [left, bottom, right, top] = parts;
   if (left >= right || bottom >= top) throw new Error('bbox bounds are invalid');
-  if (right - left > 0.05 || top - bottom > 0.05) {
+  if (right - left > 0.08 || top - bottom > 0.08) {
     throw new Error('bbox is too large for the TriWorld prototype');
   }
 
