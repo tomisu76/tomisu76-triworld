@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+
+# Proprietary BeamNG reference fixtures (protected)
+test-fixtures/
+
+# Temp backups
+backup_before_revert.patch
+*.log

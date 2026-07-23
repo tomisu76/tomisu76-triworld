@@ -32,6 +32,7 @@ export interface TriWorldRenderer {
   setWireframeVisible(visible: boolean): void;
   setVerticesVisible(visible: boolean): void;
   resetCamera(): void;
+  focusInspectPatch(): void;
   showMapOverview(): void;
   destroy(): void;
 }
@@ -154,6 +155,15 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
     viewer.scene.requestRender();
   }
 
+  function focusInspectPatch(): void {
+    const vertical = 120; // Close-up view for 1m grid inspection
+    viewer.camera.lookAtTransform(
+      modelMatrix,
+      new Cartesian3(80, -80, vertical),
+    );
+    viewer.scene.requestRender();
+  }
+
   function showMapOverview(): void {
     viewer.camera.lookAtTransform(Matrix4.IDENTITY);
     void viewer.camera.flyTo({
@@ -201,6 +211,7 @@ export function createTriWorldRenderer(containerId: string, scene: CanonicalScen
       viewer.scene.requestRender();
     },
     resetCamera,
+    focusInspectPatch,
     showMapOverview,
     destroy(): void {
       if (!viewer.isDestroyed()) viewer.destroy();
@@ -216,6 +227,7 @@ function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial
     geometryInstances: new GeometryInstance({
       id: mesh.id,
       geometry,
+      modelMatrix,
       attributes: {
         color: ColorGeometryInstanceAttribute.fromColor(color),
       },
@@ -227,7 +239,6 @@ function createSurfacePrimitive(mesh: CanonicalMesh, material: CanonicalMaterial
       translucent: false,
     }),
     asynchronous: false,
-    modelMatrix,
     releaseGeometryInstances: false,
   });
 }
@@ -241,6 +252,7 @@ function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primiti
     geometryInstances: new GeometryInstance({
       id: `${mesh.id}-wire`,
       geometry,
+      modelMatrix,
       attributes: {
         color: ColorGeometryInstanceAttribute.fromColor(Color.WHITE.withAlpha(mesh.role === 'road' ? 0.72 : 0.18)),
       },
@@ -252,7 +264,6 @@ function createWirePrimitive(mesh: CanonicalMesh, modelMatrix: Matrix4): Primiti
       translucent: true,
     }),
     asynchronous: false,
-    modelMatrix,
     releaseGeometryInstances: false,
   });
 }
@@ -304,7 +315,7 @@ function createVertexPoints(meshes: CanonicalMesh[], modelMatrix: Matrix4): Poin
 
   for (const mesh of meshes) {
     const color = mesh.role === 'road' ? Color.WHITE : Color.fromCssColorString('#9fffc7');
-    const stride = mesh.role === 'terrain' ? 4 : 1;
+    const stride = 1;
 
     for (let vertex = 0; vertex < mesh.positions.length / 3; vertex += stride) {
       const offset = vertex * 3;

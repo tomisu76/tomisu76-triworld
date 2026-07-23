@@ -1,70 +1,63 @@
 import type { CanonicalMesh, CanonicalScene, Vec3 } from './core';
 import { loadElevationModel, type ElevationModel } from './elevation';
+import {
+  buildCanonical1mInspectMesh,
+  buildCanonicalTerrain,
+  buildCesiumTerrainPreviewMesh,
+  sampleCrossSectionDiagnostics,
+  verifyCanonicalSampleAlignment,
+  type BeamNgPreset,
+  type CanonicalTerrain,
+  type CrossSectionDiagnostics,
+  type SampleAlignmentReport,
+} from './roads/canonical-terrain';
+import { buildEngineeredRoadMesh } from './roads/road-mesh';
+import { type LocalPoint } from './roads/road-stationing';
+import { SpatialRoadIndex } from './roads/spatial-road-index';
+import { buildDesignedRoad, type DesignedRoad, type RoadInput } from './roads/vertical-alignment';
 
 export interface AreaSelection {
   longitude: number;
   latitude: number;
   sizeMetres: number;
+  inspectMode?: boolean;
 }
 
-export const DEFAULT_AREA_SELECTION: AreaSelection = {
-  longitude: 18.34344407408825,
-  latitude: 48.73275071557837,
-  sizeMetres: 2000,
-};
-
-const EXCLUDED_HIGHWAYS = new Set([
-  'bridleway',
-  'bus_stop',
-  'construction',
-  'corridor',
-  'cycleway',
-  'elevator',
-  'escape',
-  'footway',
-  'path',
-  'pedestrian',
-  'platform',
-  'proposed',
-  'raceway',
-  'steps',
-]);
-
-type OsmTags = Record<string, string>;
-
-type OsmNode = {
-  type: 'node';
-  id: number;
-  lat: number;
-  lon: number;
-};
-
-type OsmWay = {
+export interface OsmWay {
   type: 'way';
   id: number;
   nodes: number[];
   tags?: OsmTags;
-};
+}
 
-type OsmElement = OsmNode | OsmWay | { type: string; id: number; [key: string]: unknown };
+export interface OsmNode {
+  type: 'node';
+  id: number;
+  lat: number;
+  lon: number;
+}
 
-type OsmApiResponse = {
-  version: string;
-  generator: string;
-  elements: OsmElement[];
-};
+export type OsmTags = Record<string, string>;
 
-type ProxyResponse = {
-  bbox: number[];
-  fetchedAt: string;
+export interface OsmPayload {
+  elements: Array<OsmWay | OsmNode>;
+}
+
+export interface ProxyResponse {
   source: string;
-  data: OsmApiResponse;
-};
+  fetchedAt: string;
+  data: OsmPayload;
+}
 
-type LocalPoint = {
-  x: number;
-  y: number;
-};
+export interface StageTimings {
+  demLoadMs: number;
+  osmLoadMs: number;
+  profileDesignMs: number;
+  spatialIndexMs: number;
+  terrainDeformMs: number;
+  roadMeshMs: number;
+  totalCompilationMs: number;
+}
 
 export interface OsmSceneStats {
   source: string;
@@ -80,58 +73,125 @@ export interface OsmSceneStats {
   minimumElevationMetres: number;
   maximumElevationMetres: number;
   reliefMetres: number;
+  timings: StageTimings;
+  earthworks: {
+    maximumCutMetres: number;
+    maximumFillMetres: number;
+    totalCutVolumeEstimate: number;
+    totalFillVolumeEstimate: number;
+  };
+  beamNgTerrain: {
+    presetLabel: string;
+    exactSizeMetres: string;
+    squareSizeMetres: number;
+    totalHeightSamples: number;
+  };
+  canonicalTerrain: {
+    resolution: BeamNgPreset;
+    squareSize: 1;
+    worldSideMetres: number;
+    totalSamples: number;
+    sampleSpacingMetres: number;
+    alignment: SampleAlignmentReport;
+    crossSection: CrossSectionDiagnostics;
+    encoding: {
+      localRelief: number;
+      chosenMaxHeight: number;
+      verticalStep: number;
+      maximumEncodingError: number;
+    };
+  };
+  cesiumOverview: {
+    previewVertices: number;
+    previewTriangles: number;
+    previewSpacingMetres: number;
+  };
+  canonical1mInspect: {
+    active: boolean;
+    patchSizeMetres: number;
+    renderedSpacingMetres: number;
+    renderedVertices: number;
+  };
 }
 
 export interface OsmSceneResult {
   scene: CanonicalScene;
   stats: OsmSceneStats;
+  canonicalTerrain: CanonicalTerrain;
 }
+
+const EXCLUDED_HIGHWAYS = new Set([
+  'footway',
+  'pedestrian',
+  'steps',
+  'path',
+  'bridleway',
+  'cycleway',
+  'proposed',
+  'construction',
+  'platform',
+  'raceway',
+]);
+
+export const DEFAULT_AREA_SELECTION: AreaSelection = {
+  longitude: 18.343444,
+  latitude: 48.732751,
+  sizeMetres: 2048, // BeamNG 2048 preset
+  inspectMode: false,
+};
 
 export function selectionToBbox(selection: AreaSelection): readonly [number, number, number, number] {
-  const safe = normaliseSelection(selection);
-  const halfExtentMetres = safe.sizeMetres / 2;
-  const metresPerDegreeLatitude = 111_320;
-  const metresPerDegreeLongitude = metresPerDegreeLatitude * Math.cos((safe.latitude * Math.PI) / 180);
-  const latitudeDelta = halfExtentMetres / metresPerDegreeLatitude;
-  const longitudeDelta = halfExtentMetres / metresPerDegreeLongitude;
+  const norm = normaliseSelection(selection);
+  const halfExtent = norm.sizeMetres / 2;
+  const metresPerDegreeLat = 111_320;
+  const metresPerDegreeLon = metresPerDegreeLat * Math.cos((norm.latitude * Math.PI) / 180);
+  const deltaLat = halfExtent / metresPerDegreeLat;
+  const deltaLon = halfExtent / metresPerDegreeLon;
 
   return [
-    safe.longitude - longitudeDelta,
-    safe.latitude - latitudeDelta,
-    safe.longitude + longitudeDelta,
-    safe.latitude + latitudeDelta,
-  ];
+    norm.longitude - deltaLon,
+    norm.latitude - deltaLat,
+    norm.longitude + deltaLon,
+    norm.latitude + deltaLat,
+  ] as const;
 }
 
-export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_AREA_SELECTION): Promise<OsmSceneResult> {
-  const selection = normaliseSelection(requestedSelection);
-  const bbox = selectionToBbox(selection);
-  const [payload, elevation] = await Promise.all([
-    fetchOsmPayload(bbox),
-    loadElevationModel(selection),
-  ]);
+export async function buildOsmScene(
+  selection: AreaSelection,
+  loadElevation: (sel: AreaSelection) => Promise<ElevationModel> = loadElevationModel,
+): Promise<OsmSceneResult> {
+  const totalStart = performance.now();
+  const normSelection = normaliseSelection(selection);
+  const bbox = selectionToBbox(normSelection);
+  const halfExtentMetres = normSelection.sizeMetres / 2;
+  const presetResolution = snapToBeamNgPreset(normSelection.sizeMetres);
+
+  const demStart = performance.now();
+  const elevation = await loadElevation(normSelection);
+  const demLoadMs = performance.now() - demStart;
+
+  const osmStart = performance.now();
+  const payload = await fetchOsmPayload(bbox);
+  const osmLoadMs = performance.now() - osmStart;
 
   const anchor = {
-    longitude: selection.longitude,
-    latitude: selection.latitude,
+    longitude: normSelection.longitude,
+    latitude: normSelection.latitude,
     height: elevation.anchorElevationMetres,
   };
-  const halfExtentMetres = selection.sizeMetres / 2;
-  const nodes = new Map<number, LocalPoint>();
 
+  const nodes = new Map<number, LocalPoint>();
   for (const element of payload.data.elements) {
-    if (element.type !== 'node') continue;
-    const node = element as OsmNode;
-    nodes.set(node.id, geographicToLocal(node.lon, node.lat, anchor));
+    if (element.type === 'node') {
+      nodes.set(element.id, geographicToLocal(element.lon, element.lat, anchor));
+    }
   }
 
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const namedRoads = new Set<string>();
-  const highwayCounts: Record<string, number> = {};
   let waysImported = 0;
-  let roadSegments = 0;
-  let totalLengthMetres = 0;
+  const highwayCounts: Record<string, number> = {};
+  const namedRoads = new Set<string>();
+
+  const rawInputs: RoadInput[] = [];
 
   for (const element of payload.data.elements) {
     if (element.type !== 'way') continue;
@@ -156,12 +216,19 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     const width = roadWidth(tags);
     let wayAdded = false;
 
-    for (const polyline of polylines) {
+    for (let pIdx = 0; pIdx < polylines.length; pIdx++) {
+      const polyline = polylines[pIdx];
       if (polyline.length < 2) continue;
-      const result = appendRoadStrip(positions, indices, polyline, width, elevation);
-      if (result.segments === 0) continue;
-      roadSegments += result.segments;
-      totalLengthMetres += result.length;
+      rawInputs.push({
+        id: `way-${way.id}-${pIdx}`,
+        osmWayId: way.id,
+        highwayClass: highway,
+        points: polyline,
+        width,
+        bridge: tags.bridge === 'yes',
+        tunnel: tags.tunnel === 'yes',
+        layer: Number.parseInt(tags.layer ?? '0', 10),
+      });
       wayAdded = true;
     }
 
@@ -171,20 +238,58 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
     if (tags.name) namedRoads.add(tags.name);
   }
 
-  if (roadSegments === 0) throw new Error('No driveable OSM highway geometry was found in the selected area.');
+  // 1. Profile Design Stage
+  const profileStart = performance.now();
+  const designedRoads: DesignedRoad[] = rawInputs.map((input) => buildDesignedRoad(input, elevation));
+  const profileDesignMs = performance.now() - profileStart;
 
-  const terrainResult = buildTerrainMesh(halfExtentMetres, selection.sizeMetres, elevation);
-  const road: CanonicalMesh = {
-    id: 'roads-osm-live',
-    role: 'road',
-    materialId: 'road-osm',
-    positions,
-    indices,
-  };
+  // Aggregate earthwork stats
+  let maximumCutMetres = 0;
+  let maximumFillMetres = 0;
+  let totalCutVolumeEstimate = 0;
+  let totalFillVolumeEstimate = 0;
 
-  const sizeLabel = `${Math.round(selection.sizeMetres)}m`;
+  for (const dr of designedRoads) {
+    maximumCutMetres = Math.max(maximumCutMetres, dr.maximumCut);
+    maximumFillMetres = Math.max(maximumFillMetres, dr.maximumFill);
+    totalCutVolumeEstimate += dr.totalCutVolumeEstimate;
+    totalFillVolumeEstimate += dr.totalFillVolumeEstimate;
+  }
+
+  // 2. Spatial Index Stage
+  const spatialStart = performance.now();
+  const spatialIndex = new SpatialRoadIndex(halfExtentMetres, designedRoads);
+  const spatialIndexMs = performance.now() - spatialStart;
+
+  // 3. Authoritative CanonicalTerrain Heightfield (1m per sample)
+  const terrainStart = performance.now();
+  const canonicalTerrain = buildCanonicalTerrain(presetResolution, elevation, spatialIndex);
+  const terrainDeformMs = performance.now() - terrainStart;
+
+  // 4. Cesium Overview Mesh (257 x 257 vertices)
+  const overviewMesh = buildCesiumTerrainPreviewMesh(canonicalTerrain, elevation.anchorElevationMetres, 257);
+
+  // 5. Optional Canonical 1m Inspect Mesh (128m x 128m patch @ exact 1m spacing)
+  const inspectMesh = buildCanonical1mInspectMesh(
+    canonicalTerrain,
+    { x: 0, y: 0 },
+    128,
+    elevation.anchorElevationMetres,
+  );
+
+  // 6. Road Mesh Generation Stage
+  const roadMeshStart = performance.now();
+  const roadResult = buildEngineeredRoadMesh(designedRoads, spatialIndex, elevation);
+  const roadMeshMs = performance.now() - roadMeshStart;
+
+  const totalCompilationMs = performance.now() - totalStart;
+
+  if (roadResult.segments === 0) throw new Error('No driveable OSM highway geometry was found in the selected area.');
+
+  const terrainMeshToRender = normSelection.inspectMode ? inspectMesh : overviewMesh;
+
   const scene: CanonicalScene = {
-    id: `triworld-osm-selected-${sizeLabel}-v02`,
+    id: `triworld-osm-beamng-${presetResolution}m-v04`,
     schemaVersion: '0.1.0',
     coordinateSystem: {
       handedness: 'right',
@@ -197,26 +302,77 @@ export async function buildOsmScene(requestedSelection: AreaSelection = DEFAULT_
       { id: 'terrain-dem', name: 'Real DEM terrain', color: [0.16, 0.42, 0.24, 1] },
       { id: 'road-osm', name: 'OpenStreetMap roads', color: [1, 0.08, 0.58, 1] },
     ],
-    meshes: [terrainResult.mesh, road],
-    spawns: [buildSpawn(positions, elevation)],
+    meshes: [terrainMeshToRender, roadResult.mesh],
+    spawns: [buildSpawn(roadResult.mesh.positions, elevation)],
   };
+
+  const alignment = verifyCanonicalSampleAlignment(canonicalTerrain, elevation);
+  const crossSection = sampleCrossSectionDiagnostics(canonicalTerrain, elevation, Math.floor(canonicalTerrain.resolution / 2));
 
   return {
     scene,
+    canonicalTerrain,
     stats: {
       source: payload.source,
       fetchedAt: payload.fetchedAt,
       bbox,
       waysImported,
-      roadSegments,
+      roadSegments: roadResult.segments,
       namedRoads: [...namedRoads].sort((a, b) => a.localeCompare(b)),
-      totalLengthMetres,
+      totalLengthMetres: roadResult.length,
       highwayCounts,
       elevationSource: elevation.source,
       anchorElevationMetres: elevation.anchorElevationMetres,
-      minimumElevationMetres: terrainResult.minimumElevationMetres,
-      maximumElevationMetres: terrainResult.maximumElevationMetres,
-      reliefMetres: terrainResult.maximumElevationMetres - terrainResult.minimumElevationMetres,
+      minimumElevationMetres: canonicalTerrain.minimumElevation,
+      maximumElevationMetres: canonicalTerrain.maximumElevation,
+      reliefMetres: canonicalTerrain.maximumElevation - canonicalTerrain.minimumElevation,
+      timings: {
+        demLoadMs,
+        osmLoadMs,
+        profileDesignMs,
+        spatialIndexMs,
+        terrainDeformMs,
+        roadMeshMs,
+        totalCompilationMs,
+      },
+      earthworks: {
+        maximumCutMetres,
+        maximumFillMetres,
+        totalCutVolumeEstimate,
+        totalFillVolumeEstimate,
+      },
+      beamNgTerrain: {
+        presetLabel: `BeamNG ${presetResolution}`,
+        exactSizeMetres: `${presetResolution} × ${presetResolution} m`,
+        squareSizeMetres: 1,
+        totalHeightSamples: canonicalTerrain.heights.length,
+      },
+      canonicalTerrain: {
+        resolution: presetResolution,
+        squareSize: 1,
+        worldSideMetres: presetResolution,
+        totalSamples: canonicalTerrain.heights.length,
+        sampleSpacingMetres: 1.0,
+        alignment,
+        crossSection,
+        encoding: {
+          localRelief: canonicalTerrain.encoding.localRelief,
+          chosenMaxHeight: canonicalTerrain.encoding.chosenMaxHeight,
+          verticalStep: canonicalTerrain.encoding.verticalStep,
+          maximumEncodingError: canonicalTerrain.encoding.maximumEncodingError,
+        },
+      },
+      cesiumOverview: {
+        previewVertices: overviewMesh.positions.length / 3,
+        previewTriangles: overviewMesh.indices.length / 3,
+        previewSpacingMetres: presetResolution / 256.0,
+      },
+      canonical1mInspect: {
+        active: Boolean(normSelection.inspectMode),
+        patchSizeMetres: 128,
+        renderedSpacingMetres: 1.0,
+        renderedVertices: inspectMesh.positions.length / 3,
+      },
     },
   };
 }
@@ -228,13 +384,20 @@ async function fetchOsmPayload(bbox: readonly [number, number, number, number]):
     const text = await response.text();
     throw new Error(`OSM request failed (${response.status}): ${text.slice(0, 220)}`);
   }
-  return await response.json() as ProxyResponse;
+  return (await response.json()) as ProxyResponse;
+}
+
+function snapToBeamNgPreset(sizeMetres: number): BeamNgPreset {
+  if (sizeMetres <= 768) return 512;
+  if (sizeMetres <= 1536) return 1024;
+  if (sizeMetres <= 3072) return 2048;
+  return 4096;
 }
 
 function normaliseSelection(selection: AreaSelection): AreaSelection {
   const longitude = Number(selection.longitude);
   const latitude = Number(selection.latitude);
-  const sizeMetres = Math.round(Number(selection.sizeMetres));
+  const sizeMetres = snapToBeamNgPreset(Number(selection.sizeMetres));
 
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     throw new Error('Selected longitude is invalid.');
@@ -242,109 +405,13 @@ function normaliseSelection(selection: AreaSelection): AreaSelection {
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
     throw new Error('Selected latitude is invalid.');
   }
-  if (!Number.isFinite(sizeMetres) || sizeMetres < 500 || sizeMetres > 4000) {
-    throw new Error('Selected area size must be between 500 and 4000 metres.');
-  }
-
-  return { longitude, latitude, sizeMetres };
-}
-
-function buildTerrainMesh(
-  halfExtentMetres: number,
-  sizeMetres: number,
-  elevation: ElevationModel,
-): { mesh: CanonicalMesh; minimumElevationMetres: number; maximumElevationMetres: number } {
-  const requestedIntervals = Math.round(sizeMetres / 12.5);
-  const intervals = Math.max(40, Math.min(320, requestedIntervals));
-  const size = intervals + 1;
-  const step = (halfExtentMetres * 2) / intervals;
-  const positions: number[] = [];
-  const indices: number[] = [];
-  let minimumElevationMetres = Number.POSITIVE_INFINITY;
-  let maximumElevationMetres = Number.NEGATIVE_INFINITY;
-
-  for (let row = 0; row < size; row++) {
-    for (let column = 0; column < size; column++) {
-      const x = -halfExtentMetres + column * step;
-      const y = -halfExtentMetres + row * step;
-      const absoluteElevation = elevation.sampleAbsoluteLocal(x, y);
-      const relativeElevation = absoluteElevation - elevation.anchorElevationMetres;
-      minimumElevationMetres = Math.min(minimumElevationMetres, absoluteElevation);
-      maximumElevationMetres = Math.max(maximumElevationMetres, absoluteElevation);
-      positions.push(x, y, relativeElevation);
-    }
-  }
-
-  for (let row = 0; row < size - 1; row++) {
-    for (let column = 0; column < size - 1; column++) {
-      const a = row * size + column;
-      const b = a + 1;
-      const c = a + size;
-      const d = c + 1;
-      indices.push(a, b, d, a, d, c);
-    }
-  }
 
   return {
-    mesh: {
-      id: `terrain-dem-${Math.round(sizeMetres)}m`,
-      role: 'terrain',
-      materialId: 'terrain-dem',
-      positions,
-      indices,
-    },
-    minimumElevationMetres,
-    maximumElevationMetres,
+    longitude,
+    latitude,
+    sizeMetres,
+    inspectMode: Boolean(selection.inspectMode),
   };
-}
-
-function appendRoadStrip(
-  positions: number[],
-  indices: number[],
-  points: LocalPoint[],
-  width: number,
-  elevation: ElevationModel,
-): { segments: number; length: number } {
-  const startVertex = positions.length / 3;
-  const halfWidth = width / 2;
-  let length = 0;
-
-  for (let index = 0; index < points.length; index++) {
-    const previous = points[Math.max(0, index - 1)];
-    const current = points[index];
-    const next = points[Math.min(points.length - 1, index + 1)];
-    const tangentX = next.x - previous.x;
-    const tangentY = next.y - previous.y;
-    const tangentLength = Math.hypot(tangentX, tangentY) || 1;
-    const normalX = -tangentY / tangentLength;
-    const normalY = tangentX / tangentLength;
-    const z = elevation.sampleRelativeLocal(current.x, current.y) + 0.42;
-
-    positions.push(
-      current.x + normalX * halfWidth,
-      current.y + normalY * halfWidth,
-      z,
-      current.x - normalX * halfWidth,
-      current.y - normalY * halfWidth,
-      z,
-    );
-
-    if (index > 0) length += distance(points[index - 1], current);
-  }
-
-  let segments = 0;
-  for (let index = 0; index < points.length - 1; index++) {
-    const left = startVertex + index * 2;
-    const right = left + 1;
-    const nextLeft = left + 2;
-    const nextRight = left + 3;
-
-    if (distance(points[index], points[index + 1]) < 0.05) continue;
-    indices.push(left, right, nextRight, left, nextRight, nextLeft);
-    segments += 1;
-  }
-
-  return { segments, length };
 }
 
 function clipPolyline(points: LocalPoint[], closed: boolean, extent: number): LocalPoint[][] {

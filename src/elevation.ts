@@ -20,7 +20,7 @@ type ElevationGrid = {
 };
 
 export async function loadElevationModel(selection: ElevationSelection): Promise<ElevationModel> {
-  const gridSize = clamp(Math.round(selection.sizeMetres / 12.5) + 1, 81, 401);
+  const gridSize = Math.round(selection.sizeMetres);
   const query = new URLSearchParams({
     lat: selection.latitude.toFixed(9),
     lon: selection.longitude.toFixed(9),
@@ -54,7 +54,7 @@ export async function loadElevationModel(selection: ElevationSelection): Promise
   );
 
   return {
-    source: `${source} · 1 m LiDAR DMR, resampled to ${width}×${height}`,
+    source: `${source} · Native 1.0m LiDAR (${width}×${height} samples)`,
     zoom: 0,
     anchorElevationMetres,
     sampleAbsoluteLocal,

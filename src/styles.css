@@ -286,8 +286,6 @@ button, input, select { font: inherit; outline: none; }
   z-index: 7;
   left: 50%;
   top: 50%;
-  width: clamp(220px, 34vw, 430px);
-  aspect-ratio: 1;
   transform: translate(-50%, -50%);
   border: 2px solid #67d5ff;
   background: rgba(103,213,255,0.10);

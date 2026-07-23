@@ -1,11 +1,15 @@
 import {
+  Cartesian2,
   Cartesian3,
   Color,
   EllipsoidTerrainProvider,
   ImageryLayer,
   Math as CesiumMath,
+  Matrix4,
   OpenStreetMapImageryProvider,
   SceneMode,
+  SceneTransforms,
+  Transforms,
   Viewer,
 } from 'cesium';
 import type { AreaSelection } from './osm-scene';
@@ -98,8 +102,39 @@ export function createAreaSelectionRenderer(
     if (notify && changed) onChange({ ...selection });
   }
 
+  function updateOverlayScale(): void {
+    const selector = document.querySelector<HTMLElement>('.fixed-area-selector');
+    if (!selector) return;
+
+    const centreCarto = viewer.camera.positionCartographic;
+    if (!centreCarto) return;
+
+    const cartesian = viewer.scene.globe.ellipsoid.cartographicToCartesian(centreCarto);
+    const transform = Transforms.eastNorthUpToFixedFrame(cartesian);
+    const offsetCartesian = Matrix4.multiplyByPoint(
+      transform,
+      new Cartesian3(selection.sizeMetres / 2, 0, 0),
+      new Cartesian3(),
+    );
+
+    const centerWin = SceneTransforms.worldToWindowCoordinates(viewer.scene, cartesian);
+    const offsetWin = SceneTransforms.worldToWindowCoordinates(viewer.scene, offsetCartesian);
+
+    if (centerWin && offsetWin) {
+      const radiusPixels = Cartesian2.distance(centerWin, offsetWin);
+      const sizePixels = Math.max(20, Math.round(radiusPixels * 2));
+      selector.style.width = `${sizePixels}px`;
+      selector.style.height = `${sizePixels}px`;
+    }
+  }
+
   const removeMoveEndListener = viewer.camera.moveEnd.addEventListener(() => {
     syncSelectionFromViewport(true);
+    updateOverlayScale();
+  });
+
+  const removePostRenderListener = viewer.scene.postRender.addEventListener(() => {
+    updateOverlayScale();
   });
 
   function focusSelection(): void {
@@ -131,10 +166,12 @@ export function createAreaSelectionRenderer(
       selection = sanitiseSelection({ ...selection, sizeMetres });
       onChange({ ...selection });
       focusSelection();
+      updateOverlayScale();
     },
     focusSelection,
     destroy(): void {
       removeMoveEndListener();
+      removePostRenderListener();
       if (!viewer.isDestroyed()) viewer.destroy();
     },
   };

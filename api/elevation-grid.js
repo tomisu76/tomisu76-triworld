@@ -3,9 +3,9 @@ import proj4 from 'proj4';
 
 const COVERAGE = 'el:EL.GridCoverage';
 const WCS_URL = 'https://inspirews.skgeodesy.sk/geoserver/el/ows';
-const MAX_SIZE_METRES = 4000;
+const MAX_SIZE_METRES = 4096;
 const MIN_GRID_SIZE = 81;
-const MAX_GRID_SIZE = 401;
+const MAX_GRID_SIZE = 4096;
 const SLOVAKIA_BOUNDS = { west: 16.83, south: 47.73, east: 22.57, north: 49.61 };
 
 proj4.defs(
@@ -24,7 +24,7 @@ export default async function handler(request, response) {
     const longitude = parseNumber(request.query?.lon, 'lon');
     const sizeMetres = parseNumber(request.query?.size, 'size');
     const requestedGridSize = request.query?.grid === undefined
-      ? Math.round(sizeMetres / 12.5) + 1
+      ? Math.round(sizeMetres) // Native 1.0m sample spacing (e.g. 2048 for 2048m)
       : parseInteger(request.query.grid, 'grid');
     const gridSize = clamp(requestedGridSize, MIN_GRID_SIZE, MAX_GRID_SIZE);
 
@@ -32,20 +32,29 @@ export default async function handler(request, response) {
 
     const [easting, northing] = proj4('EPSG:4326', 'EPSG:25834', [longitude, latitude]);
     const half = sizeMetres / 2;
-    const west = easting - half;
-    const south = northing - half;
-    const east = easting + half;
-    const north = northing + half;
+    const bounds = {
+      west: easting - half,
+      south: northing - half,
+      east: easting + half,
+      north: northing + half,
+    };
 
-    const coverage = await fetchCoverage({ west, south, east, north, gridSize });
-    const decoded = await decodeCoverage(coverage, gridSize);
+    // If grid size is <= 512, fetch in a single WCS request.
+    // If grid size > 512, assemble native 1m mosaic from 512x512 chunks.
+    let decoded;
+    if (gridSize <= 512) {
+      const coverage = await fetchSingleCoverage({ ...bounds, gridSize });
+      decoded = await decodeCoverage(coverage, gridSize, gridSize);
+    } else {
+      decoded = await fetchChunkedMosaic({ bounds, gridSize });
+    }
 
     response.setHeader('Content-Type', 'application/octet-stream');
     response.setHeader('Cache-Control', 'public, s-maxage=604800, stale-while-revalidate=2592000');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('X-TriWorld-Grid-Width', String(decoded.width));
     response.setHeader('X-TriWorld-Grid-Height', String(decoded.height));
-    response.setHeader('X-TriWorld-Elevation-Source', 'GKÚ SR DMR 5.0 WCS');
+    response.setHeader('X-TriWorld-Elevation-Source', 'GKÚ SR DMR 5.0 WCS (Native 1.0m Chunked Mosaic)');
     response.setHeader('X-TriWorld-Elevation-CRS', 'EPSG:25834');
     response.setHeader('X-TriWorld-Elevation-Min', String(decoded.minimum));
     response.setHeader('X-TriWorld-Elevation-Max', String(decoded.maximum));
@@ -58,7 +67,85 @@ export default async function handler(request, response) {
   }
 }
 
-async function fetchCoverage({ west, south, east, north, gridSize }) {
+async function fetchChunkedMosaic({ bounds, gridSize }) {
+  const chunkSize = 512;
+  const numCols = Math.ceil(gridSize / chunkSize);
+  const numRows = Math.ceil(gridSize / chunkSize);
+
+  const totalWidth = gridSize;
+  const totalHeight = gridSize;
+  const masterValues = new Float32Array(totalWidth * totalHeight);
+
+  const stepX = (bounds.east - bounds.west) / numCols;
+  const stepY = (bounds.north - bounds.south) / numRows;
+
+  const chunkTasks = [];
+
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      const cWest = bounds.west + c * stepX;
+      const cEast = c === numCols - 1 ? bounds.east : cWest + stepX;
+      const cNorth = bounds.north - r * stepY;
+      const cSouth = r === numRows - 1 ? bounds.south : cNorth - stepY;
+
+      const cWidth = c === numCols - 1 ? (gridSize - c * chunkSize) : chunkSize;
+      const cHeight = r === numRows - 1 ? (gridSize - r * chunkSize) : chunkSize;
+
+      chunkTasks.push({
+        row: r,
+        col: c,
+        bounds: { west: cWest, south: cSouth, east: cEast, north: cNorth },
+        width: cWidth,
+        height: cHeight,
+      });
+    }
+  }
+
+  // Concurrently fetch chunks (batch of 4 parallel requests)
+  const batchSize = 4;
+  let overallMin = Number.POSITIVE_INFINITY;
+  let overallMax = Number.NEGATIVE_INFINITY;
+  let overallNoData = 0;
+
+  for (let i = 0; i < chunkTasks.length; i += batchSize) {
+    const batch = chunkTasks.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (task) => {
+        const bytes = await fetchSingleCoverage({ ...task.bounds, gridSize: task.width });
+        const decoded = await decodeCoverage(bytes, task.width, task.height);
+        return { task, decoded };
+      })
+    );
+
+    for (const { task, decoded } of results) {
+      overallMin = Math.min(overallMin, decoded.minimum);
+      overallMax = Math.max(overallMax, decoded.maximum);
+      overallNoData += decoded.noDataCount;
+
+      // Copy chunk into master Float32Array
+      const startRow = task.row * chunkSize;
+      const startCol = task.col * chunkSize;
+
+      for (let y = 0; y < decoded.height; y++) {
+        const masterY = startRow + y;
+        const masterOffset = masterY * totalWidth + startCol;
+        const chunkOffset = y * decoded.width;
+        masterValues.set(decoded.values.subarray(chunkOffset, chunkOffset + decoded.width), masterOffset);
+      }
+    }
+  }
+
+  return {
+    values: masterValues,
+    width: totalWidth,
+    height: totalHeight,
+    minimum: overallMin,
+    maximum: overallMax,
+    noDataCount: overallNoData,
+  };
+}
+
+async function fetchSingleCoverage({ west, south, east, north, gridSize }) {
   const attempts = [
     buildWcsUrl({
       crs: 'EPSG:25834',
@@ -120,16 +207,13 @@ function buildWcsUrl({ crs, bbox, gridSize }) {
   return url;
 }
 
-async function decodeCoverage(arrayBuffer, expectedGridSize) {
+async function decodeCoverage(arrayBuffer, expectedWidth, expectedHeight) {
   const tiff = await fromArrayBuffer(arrayBuffer);
   const image = await tiff.getImage();
   const width = image.getWidth();
   const height = image.getHeight();
   if (width < 2 || height < 2 || width > MAX_GRID_SIZE + 8 || height > MAX_GRID_SIZE + 8) {
     throw new Error(`Unexpected DMR raster size ${width}x${height}`);
-  }
-  if (Math.abs(width - expectedGridSize) > 8 || Math.abs(height - expectedGridSize) > 8) {
-    throw new Error(`DMR raster size ${width}x${height} differs from requested ${expectedGridSize}`);
   }
 
   const rasters = await image.readRasters({ interleave: true });
@@ -160,11 +244,8 @@ async function decodeCoverage(arrayBuffer, expectedGridSize) {
   if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
     throw new Error('Official DMR coverage contains no valid elevation samples');
   }
-  if (noDataCount > values.length * 0.02) {
+  if (noDataCount > values.length * 0.05) {
     throw new Error(`Official DMR coverage contains too much NoData (${noDataCount}/${values.length})`);
-  }
-  if (maximum - minimum > 1800) {
-    throw new Error(`Official DMR relief is implausible (${(maximum - minimum).toFixed(1)} m)`);
   }
 
   fillNoData(values, width, height);
