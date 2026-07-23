@@ -20,25 +20,27 @@ export function readBeamNGTer(input: ArrayBuffer | Uint8Array): BeamNGTerrainArt
 
   const sampleCount = size * size;
   const heightMapByteLength = sampleCount * 2;
-  const layerMapByteLength = sampleCount * 1;
+  const layerMapByteLength = sampleCount;
   const minRequiredLength = 1 + 4 + heightMapByteLength + layerMapByteLength + 4;
 
   if (bytes.byteLength < minRequiredLength) {
     throw new Error(`Truncated .ter file: expected at least ${minRequiredLength} bytes, got ${bytes.byteLength}`);
   }
 
-  // Read heightMapU16
   const heightMapOffset = 5;
   const heightMapU16 = new Uint16Array(sampleCount);
+  let minimumDecodedElevation = Number.POSITIVE_INFINITY;
+  let maximumDecodedElevation = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < sampleCount; i++) {
-    heightMapU16[i] = view.getUint16(heightMapOffset + i * 2, true);
+    const value = view.getUint16(heightMapOffset + i * 2, true);
+    heightMapU16[i] = value;
+    minimumDecodedElevation = Math.min(minimumDecodedElevation, value);
+    maximumDecodedElevation = Math.max(maximumDecodedElevation, value);
   }
 
-  // Read layerMapU8
   const layerMapOffset = heightMapOffset + heightMapByteLength;
   const layerMapU8 = new Uint8Array(bytes.subarray(layerMapOffset, layerMapOffset + layerMapByteLength));
 
-  // Read Material Section
   let cursor = layerMapOffset + layerMapByteLength;
   if (cursor + 4 > bytes.byteLength) {
     throw new Error(`Truncated .ter material count header at offset ${cursor}`);
@@ -70,7 +72,6 @@ export function readBeamNGTer(input: ArrayBuffer | Uint8Array): BeamNGTerrainArt
     throw new Error(`Trailing unexplained bytes in .ter file: expected EOF at ${cursor}, file length is ${bytes.byteLength}`);
   }
 
-  // Semantic Layer Index Validation
   for (let i = 0; i < sampleCount; i++) {
     const layerIndex = layerMapU8[i];
     if (layerIndex !== 255 && layerIndex >= materialNames.length) {
@@ -78,9 +79,17 @@ export function readBeamNGTer(input: ArrayBuffer | Uint8Array): BeamNGTerrainArt
     }
   }
 
+  // The binary TER payload does not contain world scale metadata. The reader
+  // therefore exposes raw-height units (1 unit per encoded step). Callers that
+  // also load the companion .terrain.json can replace these neutral defaults.
   return {
     version,
     size,
+    squareSize: 1,
+    maxHeight: 65535,
+    heightScale: 1,
+    minimumDecodedElevation,
+    maximumDecodedElevation,
     heightMapU16,
     layerMapU8,
     materialNames,
