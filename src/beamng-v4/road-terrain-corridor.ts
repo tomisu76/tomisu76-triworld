@@ -37,9 +37,9 @@ export function applyCoupledRoadTerrainCorridor(
   config: RoadCorridorConfig = {}
 ): {
   workingElevations: Float32Array;
-  v3Result: PipelineV3Result;
   heightMapU16: Uint16Array;
   priorityBuffer: Uint8Array;
+  v3Result: PipelineV3Result;
 } {
   const shape = config.roadShapeCentered ?? DEFAULT_BANNOVE_ROAD_SHAPE_CENTERED;
   const laneWidth = config.laneWidth ?? 8.0;
@@ -74,8 +74,8 @@ export function applyCoupledRoadTerrainCorridor(
   );
 
   const workingElevations = new Float32Array(rawElevations.length);
-  const srcElev = v3Result.grid.sourceElevations;
-  const wrkElev = v3Result.grid.workingElevations;
+  const srcElev = (v3Result.grid as any).sourceElevations;
+  const wrkElev = (v3Result.grid as any).workingElevations;
 
   for (let i = 0; i < rawElevations.length; i++) {
     const delta = wrkElev[i] - srcElev[i];

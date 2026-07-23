@@ -15,19 +15,20 @@ export async function buildBeamNgZipPackage(
   artifact: BeamNGTerrainArtifact,
   files: LevelPackageFiles,
   targetZipPath: string,
-  targetManifestPath: string
+  targetManifestPath: string,
+  levelName: string = 'triworld_v4'
 ): Promise<ValidationManifest> {
   const terBuffer = writeBeamNGTer(artifact);
   const zip = new JSZip();
 
   const entries: Array<{ zipPath: string; content: Uint8Array | string }> = [
-    { zipPath: 'levels/triworld_v4/info.json', content: files.infoJson },
-    { zipPath: 'levels/triworld_v4/main/items.level.json', content: files.itemsLevelJson },
-    { zipPath: 'levels/triworld_v4/art/terrains/terrain.ter', content: terBuffer },
-    { zipPath: 'levels/triworld_v4/art/terrains/terrain.terrain.json', content: files.terrainJson },
-    { zipPath: 'levels/triworld_v4/art/terrains/main.materials.json', content: files.materialsJson },
-    { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_d.png', content: files.diffusePng },
-    { zipPath: 'levels/triworld_v4/art/terrains/triworld_v4_ground_n.png', content: files.normalPng },
+    { zipPath: `levels/${levelName}/info.json`, content: files.infoJson },
+    { zipPath: `levels/${levelName}/main/items.level.json`, content: files.itemsLevelJson },
+    { zipPath: `levels/${levelName}/art/terrains/terrain.ter`, content: terBuffer },
+    { zipPath: `levels/${levelName}/art/terrains/terrain.terrain.json`, content: files.terrainJson },
+    { zipPath: `levels/${levelName}/art/terrains/main.materials.json`, content: files.materialsJson },
+    { zipPath: `levels/${levelName}/art/terrains/ground_d.png`, content: files.diffusePng },
+    { zipPath: `levels/${levelName}/art/terrains/ground_n.png`, content: files.normalPng },
   ];
 
   entries.sort((a, b) => a.zipPath.localeCompare(b.zipPath));

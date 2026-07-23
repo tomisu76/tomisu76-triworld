@@ -17,17 +17,20 @@ export interface GisTerrainConfig {
   centerWgs84?: Wgs84Point;
   useRealDem?: boolean;
   withRoadCorridor?: boolean;
+  levelName?: string;
 }
 
 export interface GisTerrainResult {
   artifact: BeamNGTerrainArtifact;
   transformer: GeodeticTransformer;
-  rawElevations: Float32Array; // Original floating-point elevations in metres
+  rawElevations: Float32Array; // Original unmodified floating-point elevations in metres
+  modifiedElevations: Float32Array; // Final elevations after corridor cut/fill
   scannedMinElevation: number;
   scannedMaxElevation: number;
   isRealDem: boolean;
   hasRoadCorridor: boolean;
   corridorPriorityBuffer?: Uint8Array;
+  v3Result?: any; // To pass road stats
   sampleElevation: (xMetres: number, yMetres: number) => number;
 }
 
@@ -212,7 +215,7 @@ export function buildBanovceRealWorldTerrain(config: Partial<GisTerrainConfig> =
     maximumDecodedElevation: scannedMax,
     heightMapU16,
     layerMapU8,
-    materialNames: ['triworld_v4_ground'],
+    materialNames: [`${config.levelName ?? 'triworld_v4'}_ground`],
   };
 
   const sampleElevation = (xMetres: number, yMetres: number): number => {
@@ -225,10 +228,12 @@ export function buildBanovceRealWorldTerrain(config: Partial<GisTerrainConfig> =
     artifact,
     transformer,
     rawElevations,
+    modifiedElevations: rawElevations,
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem: false,
     hasRoadCorridor: false,
+    v3Result: undefined,
     sampleElevation,
   };
 }
@@ -289,12 +294,14 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   let heightMapU16: Uint16Array;
   let finalElevations = rawElevations;
   let corridorPriorityBuffer: Uint8Array | undefined = undefined;
+  let v3Result: any = undefined;
 
   if (withRoadCorridor) {
     const corridorResult = applyCoupledRoadTerrainCorridor(rawElevations, size, squareSize, maxHeight);
-    finalElevations = corridorResult.workingElevations;
+    finalElevations = new Float32Array(corridorResult.workingElevations);
     heightMapU16 = corridorResult.heightMapU16;
     corridorPriorityBuffer = corridorResult.priorityBuffer;
+    v3Result = corridorResult.v3Result;
   } else {
     const heightScale = maxHeight / 65535.0;
     heightMapU16 = new Uint16Array(size * size);
@@ -327,7 +334,7 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
     maximumDecodedElevation: scannedMax,
     heightMapU16,
     layerMapU8,
-    materialNames: ['triworld_v4_ground'],
+    materialNames: [`${config.levelName ?? 'triworld_v4'}_ground`],
   };
 
   const sampleElevation = (xMetres: number, yMetres: number): number => {
@@ -339,12 +346,14 @@ export async function buildBanovceRealWorldTerrainAsync(config: Partial<GisTerra
   return {
     artifact,
     transformer,
-    rawElevations: finalElevations,
+    rawElevations: rawElevations,
+    modifiedElevations: finalElevations,
     scannedMinElevation: scannedMin,
     scannedMaxElevation: scannedMax,
     isRealDem,
     hasRoadCorridor: withRoadCorridor,
     corridorPriorityBuffer,
+    v3Result,
     sampleElevation,
   };
 }

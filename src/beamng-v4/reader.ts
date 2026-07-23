@@ -81,6 +81,11 @@ export function readBeamNGTer(input: ArrayBuffer | Uint8Array): BeamNGTerrainArt
   return {
     version,
     size,
+    squareSize: 1.0, // Default fallback
+    maxHeight: 500.0, // Default fallback
+    heightScale: 500.0 / 65535, // Default fallback
+    minimumDecodedElevation: 0,
+    maximumDecodedElevation: 500,
     heightMapU16,
     layerMapU8,
     materialNames,

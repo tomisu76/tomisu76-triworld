@@ -3,6 +3,7 @@ import { generateSolidPng } from './texture-generator';
 import type { LevelMarker } from './diagnostic-markers';
 
 export interface LevelPackageOptions {
+  levelName?: string;
   title?: string;
   description?: string;
   extraMarkers?: LevelMarker[];
@@ -33,6 +34,7 @@ export function generateLevelPackageFiles(
 
   const title = options.title ?? "TriWorld V4 Native Gate 0";
   const description = options.description ?? "Native BeamNG terrain format validation level";
+  const levelName = options.levelName ?? "triworld_v4";
 
   const infoObj = {
     title,
@@ -82,7 +84,7 @@ export function generateLevelPackageFiles(
     name: "theTerrain",
     class: "TerrainBlock",
     __parent: "MissionGroup",
-    terrainFile: "/levels/triworld_v4/art/terrains/terrain.ter",
+    terrainFile: `/levels/${levelName}/art/terrains/terrain.ter`,
     position: [0, 0, 0],
     rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     scale: [1, 1, 1],
@@ -124,28 +126,28 @@ export function generateLevelPackageFiles(
 
   const terrainJsonObj = {
     version: 9,
-    datafile: "/levels/triworld_v4/art/terrains/terrain.ter",
+    datafile: `/levels/${levelName}/art/terrains/terrain.ter`,
     size,
     heightMapSize: size,
     heightMapItemSize: 2,
     layerMapSize: size,
     layerMapItemSize: 1,
-    materials: ["triworld_v4_ground"],
+    materials: [`${levelName}_ground`],
   };
 
   const materialsJsonObj = {
-    triworld_v4_ground: {
-      name: "triworld_v4_ground",
+    [`${levelName}_ground`]: {
+      name: `${levelName}_ground`,
       class: "TerrainMaterial",
-      internalName: "triworld_v4_ground",
-      baseColorBaseTex: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      internalName: `${levelName}_ground`,
+      baseColorBaseTex: `/levels/${levelName}/art/terrains/ground_d.png`,
       baseColorBaseTexSize: size,
-      diffuseMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      diffuseMap: `/levels/${levelName}/art/terrains/ground_d.png`,
       diffuseSize: size,
-      macroMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_d.png",
+      macroMap: `/levels/${levelName}/art/terrains/ground_d.png`,
       macroSize: size,
-      normalMap: "/levels/triworld_v4/art/terrains/triworld_v4_ground_n.png",
-      normalBaseTex: "/levels/triworld_v4/art/terrains/triworld_v4_ground_n.png",
+      normalMap: `/levels/${levelName}/art/terrains/ground_n.png`,
+      normalBaseTex: `/levels/${levelName}/art/terrains/ground_n.png`,
       normalBaseTexSize: size,
       detailSize: size,
       groundmodelName: "GRASS",

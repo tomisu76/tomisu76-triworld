@@ -77,6 +77,11 @@ export function generateAnalyticGate0Terrain(
   const artifact: BeamNGTerrainArtifact = {
     version: 9,
     size,
+    squareSize,
+    maxHeight,
+    heightScale,
+    minimumDecodedElevation: minDecodedZ,
+    maximumDecodedElevation: maxDecodedZ,
     heightMapU16,
     layerMapU8,
     materialNames: ['triworld_v4_ground'],

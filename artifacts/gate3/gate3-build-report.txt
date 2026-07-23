@@ -1,0 +1,29 @@
+gitBranch: rewrite/beamng-native-v4
+targetBeamNgVersion: 0.36.4.0
+terrainFormatVersion: 9
+roadSourceType: TriWorld V3 Sumo Plan
+roadSourcePathOrIdentifier: I9_Banovce_Mountain_Corridor
+roadPointCount: 1144
+roadTotalLengthMetres: 1141.9702678098383
+roadSamplesProcessed: 6854
+roadSamplesOutsideTerrain: 0
+terrainCellsTotal: 1048576
+terrainCellsModified: 31809
+terrainCellsUnchanged: 1016767
+terrainCellsLowered: 20373
+terrainCellsRaised: 11436
+maximumCutMetres: 18.900482177734375
+maximumFillMetres: 13.161773681640625
+meanAbsoluteModificationMetresAllCells: 0.13335630210349336
+meanAbsoluteModificationMetresModifiedCells: 4.396035559658823
+originalTerrainMinimumMetres: 303.97772216796875
+originalTerrainMaximumMetres: 493.1170654296875
+modifiedTerrainMinimumMetres: 303.97772216796875
+modifiedTerrainMaximumMetres: 493.1170654296875
+terrainHashEncoding: Float64 little-endian, row-major, north-to-south rows
+originalTerrainHash: f43f5894491c09a6226b9fe970872280ec9da1feed87a6bed0f1fb0d7459bb7b
+modifiedTerrainHash: 68dd7daabed3d23f974309b7f4637466c9aa7859e16a1d6f9c78ce92d83a4c07
+zipPath: C:\GeoCrashSim\tomisu76-triworld\dist\triworld_v4_gate3.zip
+zipSize: 3734060
+zipHash: e109ea67fd9bc6ddc69bebf11ffc705f59fc3a3f979cdcb22c01c42c4f6d74c5
+gate3ConditionsPassed: true

@@ -186,8 +186,8 @@ describe('TRIWORLD V4 — BEAMNG NATIVE, GATE 0 (23 Automated Acceptance Tests)'
     const zipData = fs.readFileSync(zipPath);
     const zip = await JSZip.loadAsync(zipData);
 
-    const diffuseEntry = zip.file('levels/triworld_v4/art/terrains/triworld_v4_ground_d.png');
-    const normalEntry = zip.file('levels/triworld_v4/art/terrains/triworld_v4_ground_n.png');
+    const diffuseEntry = zip.file('levels/triworld_v4/art/terrains/ground_d.png');
+    const normalEntry = zip.file('levels/triworld_v4/art/terrains/ground_n.png');
 
     expect(diffuseEntry).not.toBeNull();
     expect(normalEntry).not.toBeNull();
