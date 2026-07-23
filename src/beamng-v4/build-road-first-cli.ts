@@ -13,7 +13,8 @@ async function main(): Promise<void> {
     maxHeight: 500,
     roadWidth: 7.2,
     shoulderWidth: 1.6,
-    maximumGrade: 0.10,
+    // Conservative solver target leaves reserve below the 10% acceptance ceiling.
+    maximumGrade: 0.075,
     maximumBank: 0.045,
     designSpeedKmh: 55,
     stationSpacing: 4,
