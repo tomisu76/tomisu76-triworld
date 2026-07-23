@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,11 +59,34 @@ jobs:
       - name: Enforce native build result
         if: steps.road_build.outcome == 'failure'
         run: exit 1
-      - name: Upload BeamNG package
+      - name: Upload BeamNG road-first package
         uses: actions/upload-artifact@v4
         with:
           name: triworld-v4-road-first
           path: |
             dist/triworld_v4_road_first.zip
             dist/triworld_v4_road_first.manifest.json
+          if-no-files-found: error
+      - name: BeamNG custom WGS84 route ZIP
+        id: custom_route_build
+        continue-on-error: true
+        run: npm run beamng:v4:route -- routes/jankov-vrsok-demo.route.json > custom-route-build.log 2>&1
+      - name: Upload custom route build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-custom-route-build-log
+          path: custom-route-build.log
+          if-no-files-found: error
+      - name: Enforce custom route build result
+        if: steps.custom_route_build.outcome == 'failure'
+        run: exit 1
+      - name: Upload BeamNG custom route package
+        uses: actions/upload-artifact@v4
+        with:
+          name: triworld-v4-custom-route
+          path: |
+            dist/triworld_v4_custom_route.zip
+            dist/triworld_v4_custom_route.manifest.json
+            dist/triworld_v4_custom_route.input.json
           if-no-files-found: error
