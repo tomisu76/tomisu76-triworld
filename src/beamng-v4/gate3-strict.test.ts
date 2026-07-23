@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { designVerticalProfileV3, GATE3_PRODUCTION_PROFILE_CONFIG } from '../pipeline-v3/civil/designVerticalProfile';
 import { TerrainGridV3 } from '../pipeline-v3/terrain/TerrainGridV3';
 import { SumoPlanStation } from '../pipeline-v3/sumo/SumoGeometryV3';
@@ -100,4 +102,12 @@ describe('Gate 3 Strict Verification Requirements', () => {
       hashFloat64Array(rawElevations),
     );
   }, 30000);
+
+  it('6. Production acceptance treats absence of synthetic fallback as PASS', () => {
+    const sourcePath = path.join(process.cwd(), 'src', 'beamng-v4', 'build-gate3-cli.ts');
+    const source = fs.readFileSync(sourcePath, 'utf8');
+
+    expect(source).toContain('noSyntheticProductionFallbackUsed: true');
+    expect(source).not.toContain('syntheticProductionFallbackUsed: false');
+  });
 });
