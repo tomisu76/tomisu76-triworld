@@ -1,0 +1,49 @@
+name: Gate 4 Real Package
+
+on:
+  push:
+    branches:
+      - fix/gate4-native-pipeline-v3
+    paths:
+      - '.github/workflows/gate4-package.yml'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LOCALAPPDATA: /tmp/triworld-beamng-local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Generate real Gate 4 BeamNG package
+        shell: bash
+        run: |
+          set +e
+          npx --yes tsx src/beamng-v4/build-gate4-nativev3-cli.ts > /tmp/gate4-package.log 2>&1
+          status=$?
+          cat /tmp/gate4-package.log
+          exit "$status"
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-real-package-log
+          path: /tmp/gate4-package.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload BeamNG ZIP and report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triworld-v4-gate4-nativev3-real1
+          path: |
+            dist/triworld_v4_gate4_nativev3_real1.zip
+            dist/triworld_v4_gate4_nativev3_real1.manifest.json
+            dist/triworld_v4_gate4_nativev3_real1_report.json
+          if-no-files-found: error
+          retention-days: 7
