@@ -1,0 +1,1 @@
+node node_modules\tsx\dist\cli.mjs src\beamng-v4\build-orientationcheck01-cli.ts

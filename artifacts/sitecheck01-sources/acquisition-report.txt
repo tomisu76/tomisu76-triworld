@@ -1,0 +1,22 @@
+SITECHECK01 SOURCE ACQUISITION: PASS
+
+Repository: C:\Users\tomisu\triworld-gate4
+Centre WGS84: 48.710782486104385, 18.25561213182195
+Centre UTM 34N: E=298118.787, N=5398939.858
+BBox WGS84: 18.248409273426,48.706015897308,18.262813719769,48.715548711058
+OSM: 3307 nodes, 423 ways, 28 relations
+OSM SHA256: 28d0a874c34c322da378f8599adf66697fec352b4901d0494ffeb1bec0936a84
+Expected roads: Partizánska=FOUND; Trenčianska cesta=FOUND; Ľudmily Podjavorinskej=FOUND
+Orthophoto bytes: 690233
+Orthophoto SHA256: 6d24d68ca15407d9abbc43c8da80bfa3fbe1bf2a0c234c9bdffe186ae00797aa
+Orthophoto transform: NONE
+DEM Terrarium tiles: 12
+SUMO netconvert available: true
+SUMO net created: true
+
+Config: C:\Users\tomisu\triworld-gate4\config\banovce-accident-site.json
+OSM: C:\Users\tomisu\triworld-gate4\artifacts\sitecheck01-sources\banovce_accident_site.osm
+Orthophoto: C:\Users\tomisu\triworld-gate4\artifacts\sitecheck01-sources\orthophoto_raw_no_transform.png
+Provenance: C:\Users\tomisu\triworld-gate4\artifacts\sitecheck01-sources\provenance.json
+
+No commit or push was performed.

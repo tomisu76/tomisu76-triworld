@@ -65,63 +65,74 @@ export async function fetchRealBanovceOrthophoto(options: OrthoGeneratorOptions 
   esriUrl.searchParams.set('format', 'png');
   esriUrl.searchParams.set('f', 'image');
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+  const maxAttempts = 3;
+  const baseTimeoutMs = 60000;
 
-    const res = await fetch(esriUrl.toString(), { signal: controller.signal });
-    clearTimeout(timeout);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), baseTimeoutMs);
 
-    if (res.ok) {
-      const buffer = new Uint8Array(await res.arrayBuffer());
-      if (buffer.length > 50000 && buffer[0] === 137 && buffer[1] === 80) {
-        const decoded = PNG.sync.read(Buffer.from(buffer));
-        const w = decoded.width;
-        const h = decoded.height;
+      const res = await fetch(esriUrl.toString(), { signal: controller.signal });
+      clearTimeout(timeout);
 
-        const sanitized = new PNG({
-          width: w,
-          height: h,
-          colorType: 6,
-          bitDepth: 8,
-          inputHasAlpha: true,
-        });
+      if (res.ok) {
+        const buffer = new Uint8Array(await res.arrayBuffer());
+        if (buffer.length > 50000 && buffer[0] === 137 && buffer[1] === 80) {
+          const decoded = PNG.sync.read(Buffer.from(buffer));
+          const w = decoded.width;
+          const h = decoded.height;
 
-        // Rotate 180 degrees (flip both horizontally and vertically) to align with BeamNG UVs
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const srcIdx = (y * w + x) * 4;
-            const dstX = w - 1 - x;
-            const dstY = h - 1 - y;
-            const dstIdx = (dstY * w + dstX) * 4;
+          const sanitized = new PNG({
+            width: w,
+            height: h,
+            colorType: 6,
+            bitDepth: 8,
+            inputHasAlpha: true,
+          });
 
-            sanitized.data[dstIdx + 0] = decoded.data[srcIdx + 0];
-            sanitized.data[dstIdx + 1] = decoded.data[srcIdx + 1];
-            sanitized.data[dstIdx + 2] = decoded.data[srcIdx + 2];
-            sanitized.data[dstIdx + 3] = 255;
+          // Rotate 180 degrees (flip both horizontally and vertically) to align with BeamNG UVs
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const srcIdx = (y * w + x) * 4;
+              const dstX = w - 1 - x;
+              const dstY = h - 1 - y;
+              const dstIdx = (dstY * w + dstX) * 4;
+
+              sanitized.data[dstIdx + 0] = decoded.data[srcIdx + 0];
+              sanitized.data[dstIdx + 1] = decoded.data[srcIdx + 1];
+              sanitized.data[dstIdx + 2] = decoded.data[srcIdx + 2];
+              sanitized.data[dstIdx + 3] = 255;
+            }
           }
+
+          const finalDiffusePng = new Uint8Array(PNG.sync.write(sanitized));
+
+          return {
+            diffusePng: finalDiffusePng,
+            normalPng: generateSolidPng(w, h, 128, 128, 255),
+            width: w,
+            height: h,
+            isRealSatellite: true,
+          };
         }
-
-        const finalDiffusePng = new Uint8Array(PNG.sync.write(sanitized));
-
-        return {
-          diffusePng: finalDiffusePng,
-          normalPng: generateSolidPng(w, h, 128, 128, 255),
-          width: w,
-          height: h,
-          isRealSatellite: true,
-        };
+      } else {
+        console.warn(`Orthophoto fetch attempt ${attempt}/${maxAttempts} failed: HTTP ${res.status} ${res.statusText}`);
       }
+    } catch (e: unknown) {
+      const err = e as Error & { name?: string; cause?: unknown };
+      const reason = err.name === 'AbortError' ? 'timeout (60s)' : err.message ?? String(e);
+      console.warn(`Orthophoto fetch attempt ${attempt}/${maxAttempts} failed: ${reason}`);
     }
-  } catch (e) {
-    console.warn('Real satellite orthophoto fetch failed or timed out, falling back to local generator:', e);
+
+    if (attempt < maxAttempts) {
+      const delayMs = 1000 * attempt;
+      console.log(`Retrying orthophoto fetch in ${delayMs}ms...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
   }
 
-  // Fallback to local procedural orthophoto
-  return {
-    ...generateProceduralOrthophoto(textureSize, textureSize),
-    isRealSatellite: false,
-  };
+  throw new Error('Gate 4 rejected: Satellite orthophoto download failed after 3 attempts.');
 }
 
 export function generateProceduralOrthophoto(width: number = 1024, height: number = 1024): { diffusePng: Uint8Array; normalPng: Uint8Array; width: number; height: number } {

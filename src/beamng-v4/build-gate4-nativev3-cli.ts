@@ -1,0 +1,532 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { buildBanovceRealWorldTerrainAsync } from './gis-terrain';
+import { generateLevelPackageFiles } from './level-generator';
+import { fetchPrimaryOsmRoadAlignment } from './osm-road-source';
+import { fetchRealBanovceOrthophoto } from './ortho-generator';
+import { applyCoupledRoadTerrainCorridor } from './road-terrain-corridor';
+import { generateDiagnosticMarkers, type LevelMarker } from './diagnostic-markers';
+import {
+  exportRoadMeshToDae,
+  generateAsphaltTexturePng,
+  parseDaeVerticesAndAuditClearance,
+  type RoadSurfaceMeshResult,
+} from './road-mesh-exporter';
+import { resolveAuthoritativeSumoRoadAlignment } from './sumo-road-source';
+import { buildBeamNgZipPackage } from './zip-builder';
+import type { ElevationModel } from '../elevation';
+import { buildEngineeredRoadMesh } from '../roads/road-mesh';
+import { getRoadDesignPolicy } from '../roads/road-design-policy';
+import { SpatialRoadIndex } from '../roads/spatial-road-index';
+import type { DesignedRoad } from '../roads/vertical-alignment';
+
+const SIZE = 1024;
+const SQUARE_SIZE = 1.0;
+const MAX_HEIGHT = 500.0;
+const LEVEL_NAME = 'triworld_v4_gate4_nativev3_real1';
+const OSM_WAY_ID = 109459194;
+const TRACI_PORT = 8873;
+const PAVEMENT_DEPTH_METRES = 0.30;
+const VERTICES_PER_STATION = 7;
+const CROWN_VERTEX_INDEX = 3;
+const TEXTURE_REPEAT_METRES = 5.0;
+const MINIMUM_ROAD_INSET_METRES = 12;
+const MINIMUM_ROAD_LENGTH_METRES = 80;
+// TerrainGridV3 samples an even N×N heightfield around (N - 1) / 2.
+// Using SIZE / 2 would shift every DAE road vertex by half a cell relative
+// to the modified TerrainBlock and creates false cut/fill clearances on real DEM.
+const WORLD_SAMPLE_CENTER = ((SIZE - 1) * SQUARE_SIZE) / 2;
+
+function sha256(buf: Uint8Array): string {
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+function hashFile(filePath: string): string {
+  return sha256(fs.readFileSync(filePath));
+}
+
+function scanDecodedRange(
+  values: Uint16Array,
+  heightScale: number,
+): { minimum: number; maximum: number } {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const decoded = value * heightScale;
+    minimum = Math.min(minimum, decoded);
+    maximum = Math.max(maximum, decoded);
+  }
+  return { minimum, maximum };
+}
+
+function createStrictTerrainSampler(
+  elevations: Float32Array,
+  size: number,
+  squareSize: number,
+): (xMetres: number, yMetres: number) => number {
+  return (xMetres: number, yMetres: number): number => {
+    const column = xMetres / squareSize;
+    const row = (size - 1) - yMetres / squareSize;
+    if (
+      !Number.isFinite(column) || !Number.isFinite(row) ||
+      column < 0 || column > size - 1 || row < 0 || row > size - 1
+    ) {
+      throw new RangeError(`Terrain sample outside grid: (${xMetres}, ${yMetres}).`);
+    }
+
+    const c0 = Math.min(size - 2, Math.floor(column));
+    const r0 = Math.min(size - 2, Math.floor(row));
+    const c1 = c0 + 1;
+    const r1 = r0 + 1;
+    const tx = column - c0;
+    const ty = row - r0;
+    const z00 = elevations[r0 * size + c0];
+    const z10 = elevations[r0 * size + c1];
+    const z01 = elevations[r1 * size + c0];
+    const z11 = elevations[r1 * size + c1];
+    const z0 = z00 + (z10 - z00) * tx;
+    const z1 = z01 + (z11 - z01) * tx;
+    return z0 + (z1 - z0) * ty;
+  };
+}
+
+function adaptEngineeredMeshForDae(
+  engineered: ReturnType<typeof buildEngineeredRoadMesh>,
+  sampleTerrainElevation: (x: number, y: number) => number,
+  stationValues: readonly number[],
+  widthMetres: number,
+): RoadSurfaceMeshResult {
+  const vertexCount = engineered.mesh.positions.length / 3;
+  if (vertexCount !== stationValues.length * VERTICES_PER_STATION) {
+    throw new Error(
+      `Engineered mesh layout mismatch: expected ${stationValues.length * VERTICES_PER_STATION} ` +
+      `vertices for ${stationValues.length} stations, received ${vertexCount}.`,
+    );
+  }
+
+  const positions = new Float32Array(engineered.mesh.positions.length);
+  const normals = new Float32Array(engineered.mesh.positions.length);
+  const uvs = new Float32Array(vertexCount * 2);
+  let minimumClearance = Number.POSITIVE_INFINITY;
+  let maximumClearance = Number.NEGATIVE_INFINITY;
+  let totalClearance = 0;
+  let negativeCount = 0;
+  let maxAdjacentZJumpMetres = 0;
+
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    const source = vertex * 3;
+    const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
+    const crossSectionIndex = vertex % VERTICES_PER_STATION;
+    const x = engineered.mesh.positions[source] + WORLD_SAMPLE_CENTER;
+    const y = engineered.mesh.positions[source + 1] + WORLD_SAMPLE_CENTER;
+    const z = engineered.mesh.positions[source + 2];
+    positions[source] = x;
+    positions[source + 1] = y;
+    positions[source + 2] = z;
+    normals[source + 2] = 1;
+    uvs[vertex * 2] = crossSectionIndex / (VERTICES_PER_STATION - 1);
+    uvs[vertex * 2 + 1] = stationValues[stationIndex] / TEXTURE_REPEAT_METRES;
+
+    const clearance = z - sampleTerrainElevation(x, y);
+    minimumClearance = Math.min(minimumClearance, clearance);
+    maximumClearance = Math.max(maximumClearance, clearance);
+    totalClearance += clearance;
+    if (clearance < 0) negativeCount++;
+  }
+
+  for (let station = 1; station < stationValues.length; station++) {
+    const previousCrownVertex = (station - 1) * VERTICES_PER_STATION + CROWN_VERTEX_INDEX;
+    const currentCrownVertex = station * VERTICES_PER_STATION + CROWN_VERTEX_INDEX;
+    const previousZ = positions[previousCrownVertex * 3 + 2];
+    const currentZ = positions[currentCrownVertex * 3 + 2];
+    maxAdjacentZJumpMetres = Math.max(maxAdjacentZJumpMetres, Math.abs(currentZ - previousZ));
+  }
+
+  return {
+    positions,
+    normals,
+    uvs,
+    indices: new Uint32Array(engineered.mesh.indices),
+    vertexCount,
+    triangleCount: engineered.mesh.indices.length / 3,
+    segmentCount: engineered.segments,
+    lengthMetres: engineered.length,
+    widthMetres,
+    clearanceStats: {
+      minMetres: Number(minimumClearance.toFixed(3)),
+      maxMetres: Number(maximumClearance.toFixed(3)),
+      meanMetres: Number((totalClearance / vertexCount).toFixed(3)),
+      negativeCount,
+      maxAdjacentZJumpMetres: Number(maxAdjacentZJumpMetres.toFixed(3)),
+    },
+  };
+}
+
+function createStationMarkers(
+  stations: readonly { station: number; x: number; y: number; surfaceZ: number }[],
+  profileAnchorElevation: number,
+): LevelMarker[] {
+  const markers: LevelMarker[] = [];
+  for (let index = 0; index < stations.length; index += 25) {
+    const station = stations[index];
+    markers.push({
+      name: `station_marker_${Math.round(station.station)}m`,
+      class: 'TSStatic',
+      __parent: 'MissionGroup',
+      position: [
+        station.x + WORLD_SAMPLE_CENTER,
+        station.y + WORLD_SAMPLE_CENTER,
+        station.surfaceZ + profileAnchorElevation + 0.5,
+      ],
+      rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      scale: [0.5, 0.5, 0.5],
+    });
+  }
+  return markers;
+}
+
+async function main(): Promise<void> {
+  console.log(`Building TriWorld V4 Gate 4 Native Pipeline V3 Level: ${LEVEL_NAME}...`);
+
+  const sumoNetPath = path.resolve('artifacts/gate3-osm/banovce_authoritative.net.xml');
+  const sumoNetXml = fs.readFileSync(sumoNetPath, 'utf-8');
+  const sumoNetHash = hashFile(sumoNetPath);
+
+  const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
+    size: SIZE,
+    squareSize: SQUARE_SIZE,
+    maxHeight: MAX_HEIGHT,
+    withRoadCorridor: false,
+    levelName: LEVEL_NAME,
+  });
+
+  if (!sourceTerrain.isRealDem) {
+    throw new Error('Gate 4 rejected: DEM download failed and analytic fallback was used.');
+  }
+
+  // OSM remains the metadata authority for highway class, name, and engineered width.
+  // Horizontal geometry below is resolved exclusively from the committed SUMO network.
+  const roadMetadata = await fetchPrimaryOsmRoadAlignment(sourceTerrain.transformer, {
+    minimumLengthMetres: MINIMUM_ROAD_LENGTH_METRES,
+    minimumInsetMetres: MINIMUM_ROAD_INSET_METRES,
+  });
+  if (roadMetadata.wayId !== OSM_WAY_ID) {
+    throw new Error(`Gate 4 rejected: expected OSM way ${OSM_WAY_ID}, selected ${roadMetadata.wayId}.`);
+  }
+
+  const sumoRoad = resolveAuthoritativeSumoRoadAlignment(
+    sumoNetXml,
+    sourceTerrain.transformer,
+    OSM_WAY_ID,
+    roadMetadata.laneWidthMetres,
+    MINIMUM_ROAD_INSET_METRES,
+    MINIMUM_ROAD_LENGTH_METRES,
+  );
+  const roadSourceId = `sumo-way-${OSM_WAY_ID}-positive-fragment-0`;
+
+  console.log(
+    `SUMO road resolved: ${sumoRoad.usedEdgeIds.join(' -> ')}, ` +
+    `${sumoRoad.pointCount} points, ${sumoRoad.lengthMetres.toFixed(1)}m, ` +
+    `sha256=${sumoRoad.sha256}.`,
+  );
+  console.log(
+    `OSM metadata retained: ${roadMetadata.name ?? roadMetadata.highway}, ` +
+    `${roadMetadata.highway}, width=${roadMetadata.laneWidthMetres.toFixed(2)}m.`,
+  );
+
+  const corridor = applyCoupledRoadTerrainCorridor(
+    sourceTerrain.rawElevations,
+    SIZE,
+    SQUARE_SIZE,
+    MAX_HEIGHT,
+    {
+      roadShapeCentered: sumoRoad.pointsCentered,
+      roadSourceId,
+      laneWidth: roadMetadata.laneWidthMetres,
+      formationDepthMetres: PAVEMENT_DEPTH_METRES,
+    },
+  );
+
+  const profileAnchorElevation = corridor.v3Result.grid.anchorElevation;
+  const heightScale = MAX_HEIGHT / 65535.0;
+  const decodedRange = scanDecodedRange(corridor.heightMapU16, heightScale);
+  const artifact = {
+    ...sourceTerrain.artifact,
+    heightMapU16: corridor.heightMapU16,
+    minimumDecodedElevation: decodedRange.minimum,
+    maximumDecodedElevation: decodedRange.maximum,
+    materialNames: [`${LEVEL_NAME}_ground`],
+  };
+
+  const sampleTerrainElevation = createStrictTerrainSampler(
+    corridor.workingElevations,
+    SIZE,
+    SQUARE_SIZE,
+  );
+  const baseMarkers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
+
+  const stations = corridor.v3Result.stations;
+  const designPolicy = getRoadDesignPolicy(roadMetadata.highway);
+  const halfWidth = roadMetadata.laneWidthMetres / 2;
+  const engineeredElevation: ElevationModel = {
+    source: 'Gate 4 SUMO-coupled subgrade terrain',
+    zoom: 0,
+    anchorElevationMetres: 0,
+    sampleAbsoluteLocal: (x, y) => sampleTerrainElevation(
+      x + WORLD_SAMPLE_CENTER,
+      y + WORLD_SAMPLE_CENTER,
+    ),
+    sampleRelativeLocal: (x, y) => sampleTerrainElevation(
+      x + WORLD_SAMPLE_CENTER,
+      y + WORLD_SAMPLE_CENTER,
+    ),
+  };
+  const designedRoad: DesignedRoad = {
+    id: roadSourceId,
+    osmWayId: OSM_WAY_ID,
+    highwayClass: roadMetadata.highway,
+    bridge: false,
+    tunnel: false,
+    layer: 0,
+    stations: stations.map((station, index) => {
+      const previous = stations[Math.max(0, index - 1)];
+      const next = stations[Math.min(stations.length - 1, index + 1)];
+      const ds = next.station - previous.station;
+      return {
+        station: station.station,
+        x: station.x,
+        y: station.y,
+        groundZ: station.groundZ + profileAnchorElevation,
+        designZ: station.surfaceZ + profileAnchorElevation,
+        grade: ds > 0 ? (next.surfaceZ - previous.surfaceZ) / ds : 0,
+        tangentX: station.tangentX,
+        tangentY: station.tangentY,
+        normalX: station.normalX,
+        normalY: station.normalY,
+        leftX: station.x + station.normalX * halfWidth,
+        leftY: station.y + station.normalY * halfWidth,
+        rightX: station.x - station.normalX * halfWidth,
+        rightY: station.y - station.normalY * halfWidth,
+        roadWidth: roadMetadata.laneWidthMetres,
+        shoulderWidth: designPolicy.shoulderWidth,
+        crossfall: designPolicy.crossfall,
+      };
+    }),
+    designPolicy,
+    maximumCut: corridor.stats.maximumCutMetres,
+    maximumFill: corridor.stats.maximumFillMetres,
+    totalCutVolumeEstimate: 0,
+    totalFillVolumeEstimate: 0,
+    verticalCurves: [],
+  };
+
+  const engineeredResult = buildEngineeredRoadMesh(
+    [designedRoad],
+    new SpatialRoadIndex(WORLD_SAMPLE_CENTER, [designedRoad]),
+    engineeredElevation,
+  );
+  const roadMesh = adaptEngineeredMeshForDae(
+    engineeredResult,
+    sampleTerrainElevation,
+    stations.map((station) => station.station),
+    roadMetadata.laneWidthMetres,
+  );
+  const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
+  const asphaltPng = generateAsphaltTexturePng(256);
+
+  const daeAudit = parseDaeVerticesAndAuditClearance(roadDae, sampleTerrainElevation);
+  const crossfallDrop = Math.abs((roadMetadata.laneWidthMetres / 2) * designPolicy.crossfall);
+  const minimumAllowedClearance = PAVEMENT_DEPTH_METRES - crossfallDrop - 0.05;
+  const maximumAllowedClearance = PAVEMENT_DEPTH_METRES + 0.05;
+
+  console.log(
+    `Road Mesh V3 generated: ${roadMesh.vertexCount} vertices, ` +
+    `${roadMesh.triangleCount} triangles, ${roadMesh.segmentCount} segments.`,
+  );
+  console.log(
+    `Pipeline V3 DAE subgrade audit: min=${daeAudit.minClearance}m, ` +
+    `max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, ` +
+    `negativeCount=${daeAudit.negativeCount}.`,
+  );
+  console.log(`Max adjacent crown Z step: ${roadMesh.clearanceStats.maxAdjacentZJumpMetres}m.`);
+
+  if (daeAudit.parsedVertexCount !== roadMesh.vertexCount) {
+    throw new Error(
+      `Gate 4 rejected: DAE vertex count ${daeAudit.parsedVertexCount} does not match ` +
+      `engineered mesh ${roadMesh.vertexCount}.`,
+    );
+  }
+  if (daeAudit.negativeCount > 0) {
+    throw new Error(
+      `Gate 4 rejected: ${daeAudit.negativeCount} negative-clearance vertices detected in DAE ` +
+      `(min ${daeAudit.minClearance}m, max ${daeAudit.maxClearance}m).`,
+    );
+  }
+  if (daeAudit.minClearance < minimumAllowedClearance) {
+    throw new Error(
+      `Gate 4 rejected: Min DAE clearance ${daeAudit.minClearance}m is below engineered ` +
+      `subgrade limit ${minimumAllowedClearance.toFixed(3)}m.`,
+    );
+  }
+  if (daeAudit.maxClearance > maximumAllowedClearance) {
+    throw new Error(
+      `Gate 4 rejected: Max DAE clearance ${daeAudit.maxClearance}m exceeds engineered ` +
+      `subgrade limit ${maximumAllowedClearance.toFixed(3)}m.`,
+    );
+  }
+  if (roadMesh.clearanceStats.maxAdjacentZJumpMetres > 0.35) {
+    throw new Error(
+      `Gate 4 rejected: adjacent crown Z jump ` +
+      `${roadMesh.clearanceStats.maxAdjacentZJumpMetres}m exceeds 0.35m.`,
+    );
+  }
+
+  const debugMarkers: LevelMarker[] = [
+    ...baseMarkers,
+    ...createStationMarkers(stations, profileAnchorElevation),
+  ];
+
+  const { diffusePng, isRealSatellite } = await fetchRealBanovceOrthophoto({
+    transformer: sourceTerrain.transformer,
+    textureSize: SIZE,
+  });
+  if (!isRealSatellite) {
+    throw new Error('Gate 4 rejected: Satellite orthophoto download failed.');
+  }
+
+  const levelFiles = generateLevelPackageFiles(artifact, {
+    levelName: LEVEL_NAME,
+    title: 'TriWorld V4 Native Gate 4 — SUMO Engineered Road and Subgrade',
+    description:
+      'Native BeamNG level built from real DEM terrain, accepted orthophoto, ' +
+      'the authoritative SUMO edge centerline for OSM way 109459194, a 0.30m subgrade, ' +
+      'and a seven-point engineered asphalt road surface.',
+    extraMarkers: debugMarkers,
+    diffusePng,
+    normalPng: undefined,
+    roadDae,
+    asphaltPng,
+    asphaltMaterialName: 'triworld_asphalt',
+  });
+
+  const distDir = path.resolve('dist');
+  fs.mkdirSync(distDir, { recursive: true });
+  const zipPath = path.join(distDir, `${LEVEL_NAME}.zip`);
+  const manifestPath = path.join(distDir, `${LEVEL_NAME}.manifest.json`);
+
+  await buildBeamNgZipPackage(
+    artifact,
+    levelFiles,
+    zipPath,
+    manifestPath,
+    LEVEL_NAME,
+  );
+  const zipHash = hashFile(zipPath);
+
+  const targetModsPath = path.join(
+    process.env.LOCALAPPDATA ?? 'C:\\Users\\tomisu\\AppData\\Local',
+    'BeamNG',
+    'BeamNG.drive',
+    'current',
+    'mods',
+  );
+  fs.mkdirSync(targetModsPath, { recursive: true });
+  const installedZipPath = path.join(targetModsPath, `${LEVEL_NAME}.zip`);
+  fs.copyFileSync(zipPath, installedZipPath);
+  const installedZipHash = hashFile(installedZipPath);
+  if (zipHash !== installedZipHash) {
+    throw new Error('Gate 4 rejected: Source ZIP and installed ZIP SHA-256 mismatch.');
+  }
+
+  const reportJsonPath = path.join(distDir, `${LEVEL_NAME}_report.json`);
+  const buildReport = {
+    levelName: LEVEL_NAME,
+    worldSampleCenterMetres: WORLD_SAMPLE_CENTER,
+    profileAnchorElevation,
+    formationDepthMetres: PAVEMENT_DEPTH_METRES,
+    sumoNetPath,
+    sumoNetHash,
+    sumoGeometrySourceType: sumoRoad.sourceType,
+    sumoGeometryHash: sumoRoad.sha256,
+    sumoNetOffset: sumoRoad.netOffset,
+    sumoAllEdgesVerified: sumoRoad.allEdgeIds,
+    sumoAllLanesVerified: sumoRoad.allLaneIds,
+    sumoEdgesUsedForRoadSurface: sumoRoad.usedEdgeIds,
+    sumoLanesAssociatedWithUsedEdges: sumoRoad.usedLaneIds,
+    sumoGeometryUsedForRoadSurface: true,
+    sumoRoadPointCount: sumoRoad.pointCount,
+    sumoRoadBoundsCentered: sumoRoad.boundsCentered,
+    traciPort: TRACI_PORT,
+    traciVerifiedByThisBuild: false,
+    osmMetadata: {
+      wayId: roadMetadata.wayId,
+      fragmentIndex: roadMetadata.fragmentIndex,
+      highway: roadMetadata.highway,
+      name: roadMetadata.name,
+      laneWidthMetres: roadMetadata.laneWidthMetres,
+      sourceUrl: roadMetadata.sourceUrl,
+      sourceHash: roadMetadata.sha256,
+    },
+    roadSourceId,
+    roadLengthMetres: sumoRoad.lengthMetres,
+    roadWidthMetres: roadMetadata.laneWidthMetres,
+    roadMeshStats: {
+      verticesPerStation: VERTICES_PER_STATION,
+      stationCount: stations.length,
+      vertexCount: roadMesh.vertexCount,
+      triangleCount: roadMesh.triangleCount,
+      segmentCount: roadMesh.segmentCount,
+      clearanceStats: roadMesh.clearanceStats,
+    },
+    terrainCorridorStats: corridor.stats,
+    daeRuntimeAudit: daeAudit,
+    clearanceAcceptanceRange: {
+      minimumMetres: Number(minimumAllowedClearance.toFixed(3)),
+      maximumMetres: Number(maximumAllowedClearance.toFixed(3)),
+    },
+    zipPath,
+    zipHash,
+    installedZipPath,
+    installedZipHash,
+    acceptance: {
+      negativeClearanceCountZero: daeAudit.negativeCount === 0,
+      daeVertexCountMatches: daeAudit.parsedVertexCount === roadMesh.vertexCount,
+      minSubgradeClearanceMet: daeAudit.minClearance >= minimumAllowedClearance,
+      maxSubgradeClearanceMet: daeAudit.maxClearance <= maximumAllowedClearance,
+      noZJumpAboveLimit: roadMesh.clearanceStats.maxAdjacentZJumpMetres <= 0.35,
+      sevenVerticesPerStation: roadMesh.vertexCount === stations.length * VERTICES_PER_STATION,
+      zipHashesMatch: zipHash === installedZipHash,
+      realDemUsed: true,
+      realOsmMetadataUsed: true,
+      authoritativeSumoNetLoaded: sumoRoad.allEdgeIds.length === 4,
+      authoritativeSumoGeometryUsed: true,
+      reverseSumoTopologyVerified: true,
+    },
+  };
+  fs.writeFileSync(reportJsonPath, JSON.stringify(buildReport, null, 2));
+
+  console.log('GATE 4 NATIVE PIPELINE V3 BUILD SUCCESSFUL');
+  console.log(`Level: ${LEVEL_NAME}`);
+  console.log(`World sample centre: ${WORLD_SAMPLE_CENTER.toFixed(3)}m`);
+  console.log(`Profile anchor elevation: ${profileAnchorElevation.toFixed(3)}m`);
+  console.log(`SUMO surface edges: ${sumoRoad.usedEdgeIds.join(' -> ')}`);
+  console.log(`SUMO geometry SHA-256: ${sumoRoad.sha256}`);
+  console.log(
+    `Road Mesh: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ` +
+    `${roadMesh.lengthMetres.toFixed(1)}m length`,
+  );
+  console.log(
+    `DAE subgrade audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, ` +
+    `mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}`,
+  );
+  console.log(`ZIP: ${zipPath}`);
+  console.log(`Installed Mod: ${installedZipPath}`);
+  console.log(`ZIP SHA-256: ${zipHash}`);
+  console.log(`Report: ${reportJsonPath}`);
+}
+
+main().catch((error: unknown) => {
+  console.error('FATAL NATIVE PIPELINE V3 BUILD ERROR:', error);
+  process.exit(1);
+});

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Minimal SUMO net.xml test fixture for GeoCrashSim parser verification.
+
+    This fixture models a simple 4-junction crossroads near Bánovce nad Bebravou.
+    UTM Zone 34N (EPSG:32634) coordinates with netOffset applied.
+
+    Actual UTM coordinates (approx):
+      J_north: E=298100, N=5399000  → net: (100.00, 200.00)
+      J_south: E=298100, N=5398880  → net: (100.00, 80.00)
+      J_east:  E=298200, N=5398940  → net: (200.00, 140.00)
+      J_west:  E=298020, N=5398940  → net: (20.00, 140.00)
+      J_center:E=298100, N=5398940  → net: (100.00, 140.00)
+
+    netOffset = "-298000.00,-5398800.00"
+    So: projected = net_coord - netOffset = net_coord + (298000, 5398800)
+
+    This fixture includes:
+      - <location> with UTM34 projection
+      - 5 junctions (4 external + 1 traffic_light center)
+      - 4 ordinary edges with 1-2 lanes each
+      - 4 internal edges at the center junction
+      - lane shapes
+      - 6 connections with via attributes
+      - 1 tlLogic with 4 phases
+      - <param key="origId"> for OSM provenance
+-->
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="-298000.00,-5398800.00"
+              convBoundary="20.00,80.00,200.00,200.00"
+              origBoundary="18.2500,48.7080,18.2600,48.7140"
+              projParameter="+proj=utm +zone=34 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"/>
+
+    <!-- Traffic light at center junction -->
+    <tlLogic id="TL_center" type="static" programID="0" offset="0">
+        <phase duration="31" state="GGgrrr"/>
+        <phase duration="6"  state="yyyrrr"/>
+        <phase duration="31" state="rrrGGg"/>
+        <phase duration="6"  state="rrryyy"/>
+    </tlLogic>
+
+    <!-- Ordinary edges -->
+    <edge id="E_south_center" from="J_south" to="J_center" priority="7" numLanes="2" speed="13.89"
+          type="highway.secondary" name="Partizánska">
+        <param key="origId" value="123456789"/>
+        <lane id="E_south_center_0" index="0" speed="13.89" length="60.00"
+              width="3.20"
+              allow="passenger bus"
+              shape="100.00,80.00 100.00,100.00 100.00,130.00"/>
+        <lane id="E_south_center_1" index="1" speed="13.89" length="60.00"
+              width="3.20"
+              shape="103.20,80.00 103.20,100.00 103.20,130.00"/>
+    </edge>
+
+    <edge id="E_center_north" from="J_center" to="J_north" priority="7" numLanes="2" speed="13.89"
+          type="highway.secondary" name="Partizánska">
+        <param key="origId" value="123456789"/>
+        <lane id="E_center_north_0" index="0" speed="13.89" length="60.00"
+              width="3.20"
+              shape="100.00,150.00 100.00,170.00 100.00,200.00"/>
+        <lane id="E_center_north_1" index="1" speed="13.89" length="60.00"
+              width="3.20"
+              shape="103.20,150.00 103.20,170.00 103.20,200.00"/>
+    </edge>
+
+    <edge id="E_west_center" from="J_west" to="J_center" priority="5" numLanes="1" speed="8.33"
+          type="highway.residential" name="Ľudmily Podjavorinskej">
+        <param key="origId" value="987654321"/>
+        <lane id="E_west_center_0" index="0" speed="8.33" length="80.00"
+              shape="20.00,140.00 50.00,140.00 90.00,140.00"/>
+    </edge>
+
+    <edge id="E_center_east" from="J_center" to="J_east" priority="5" numLanes="1" speed="8.33"
+          type="highway.residential">
+        <lane id="E_center_east_0" index="0" speed="8.33" length="100.00"
+              shape="110.00,140.00 150.00,140.00 200.00,140.00"/>
+    </edge>
+
+    <!-- Internal edges at center junction -->
+    <edge id=":J_center_0" function="internal">
+        <lane id=":J_center_0_0" index="0" speed="13.89" length="10.00"
+              shape="100.00,130.00 100.00,140.00 100.00,150.00"/>
+    </edge>
+
+    <edge id=":J_center_1" function="internal">
+        <lane id=":J_center_1_0" index="0" speed="13.89" length="10.00"
+              shape="103.20,130.00 103.20,140.00 103.20,150.00"/>
+    </edge>
+
+    <edge id=":J_center_2" function="internal">
+        <lane id=":J_center_2_0" index="0" speed="8.33" length="10.00"
+              shape="90.00,140.00 100.00,140.00 110.00,140.00"/>
+    </edge>
+
+    <edge id=":J_center_3" function="internal">
+        <lane id=":J_center_3_0" index="0" speed="8.33" length="14.14"
+              shape="90.00,140.00 95.00,142.00 100.00,145.00 100.00,150.00"/>
+    </edge>
+
+    <!-- Junctions -->
+    <junction id="J_south" type="dead_end" x="100.00" y="80.00"
+              incLanes="" intLanes=""
+              shape="96.80,80.00 106.40,80.00"/>
+
+    <junction id="J_north" type="dead_end" x="100.00" y="200.00"
+              incLanes="E_center_north_0 E_center_north_1" intLanes=""
+              shape="96.80,200.00 106.40,200.00"/>
+
+    <junction id="J_west" type="dead_end" x="20.00" y="140.00"
+              incLanes="" intLanes=""
+              shape="20.00,136.80 20.00,143.20"/>
+
+    <junction id="J_east" type="dead_end" x="200.00" y="140.00"
+              incLanes="E_center_east_0" intLanes=""
+              shape="200.00,136.80 200.00,143.20"/>
+
+    <junction id="J_center" type="traffic_light" x="100.00" y="140.00"
+              incLanes="E_south_center_0 E_south_center_1 E_west_center_0"
+              intLanes=":J_center_0_0 :J_center_1_0 :J_center_2_0 :J_center_3_0"
+              shape="96.80,150.00 106.40,150.00 110.00,143.20 110.00,136.80 96.80,130.00 90.00,136.80 90.00,143.20"/>
+
+    <!-- Internal junctions -->
+    <junction id=":J_center_0" type="internal" x="100.00" y="140.00"
+              incLanes="E_south_center_0" intLanes=""/>
+
+    <junction id=":J_center_1" type="internal" x="103.20" y="140.00"
+              incLanes="E_south_center_1" intLanes=""/>
+
+    <!-- Connections -->
+    <connection from="E_south_center" to="E_center_north" fromLane="0" toLane="0"
+                via=":J_center_0_0" tl="TL_center" linkIndex="0" dir="s" state="o"/>
+    <connection from="E_south_center" to="E_center_north" fromLane="1" toLane="1"
+                via=":J_center_1_0" tl="TL_center" linkIndex="1" dir="s" state="o"/>
+    <connection from="E_south_center" to="E_center_east" fromLane="1" toLane="0"
+                via=":J_center_1_0" tl="TL_center" linkIndex="2" dir="r" state="o"/>
+    <connection from="E_west_center" to="E_center_east" fromLane="0" toLane="0"
+                via=":J_center_2_0" tl="TL_center" linkIndex="3" dir="s" state="o"/>
+    <connection from="E_west_center" to="E_center_north" fromLane="0" toLane="0"
+                via=":J_center_3_0" tl="TL_center" linkIndex="4" dir="l" state="o"/>
+    <connection from="E_west_center" to="E_center_north" fromLane="0" toLane="1"
+                via=":J_center_3_0" tl="TL_center" linkIndex="5" dir="l" state="o"/>
+
+</net>

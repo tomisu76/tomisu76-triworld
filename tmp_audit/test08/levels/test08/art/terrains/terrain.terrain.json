@@ -1,0 +1,12 @@
+{
+  "version": 9,
+  "datafile": "/levels/test08/art/terrains/terrain.ter",
+  "size": 1024,
+  "heightMapSize": 1024,
+  "heightMapItemSize": 2,
+  "layerMapSize": 1024,
+  "layerMapItemSize": 1,
+  "materials": [
+    "ASPHALT"
+  ]
+}
