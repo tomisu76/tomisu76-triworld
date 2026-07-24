@@ -12,12 +12,15 @@ export interface FormationCoverageResultV3 {
   halfWidthMetres: number;
 }
 
+const LOCAL_TOPOLOGY_WINDOW_SEGMENTS = 4;
+
 /**
  * Guarantees a continuous, deterministic formation bed beneath the complete
- * physical road cross-section. The triangle transaction remains authoritative
- * wherever it already produced formation. Only uncovered/slope cells inside
- * the road tube are repaired, using the transaction's segment ownership to
- * prevent a nearby but topologically unrelated bend from supplying elevation.
+ * physical road cross-section. The original triangle owner anchors each cell
+ * to a small longitudinal neighbourhood. Within that neighbourhood the
+ * geometrically closest segment supplies formation elevation. This repairs
+ * sharp-bend overlaps without allowing a spatially close but topologically
+ * unrelated part of the road to overwrite the cell.
  */
 export function enforceContinuousFormationCoverageV3(
   stations: readonly DesignedSumoStation[],
@@ -48,11 +51,10 @@ export function enforceContinuousFormationCoverageV3(
   }
 
   const buffers = transaction.buffers;
+  const originalOwner = new Uint32Array(buffers.segmentRank);
   const halfWidthMetres = laneHalfWidthMetres + shoulderWidthMetres + safetyZoneMetres;
   const halfWidthSquared = halfWidthMetres * halfWidthMetres;
   const cellCount = grid.N * grid.N;
-  const bestTopologyDistance = new Float64Array(cellCount);
-  bestTopologyDistance.fill(Number.POSITIVE_INFINITY);
   const bestDistanceSquared = new Float64Array(cellCount);
   bestDistanceSquared.fill(Number.POSITIVE_INFINITY);
   const bestSegment = new Uint32Array(cellCount);
@@ -89,10 +91,13 @@ export function enforceContinuousFormationCoverageV3(
       const y = grid.rowToY(row);
       for (let column = minColumn; column <= maxColumn; column++) {
         const index = row * grid.N + column;
-
-        // Never replace a formation value produced by the canonical triangle
-        // transaction. This avoids cross-talk between spatially close bends.
-        if (buffers.priority[index] === PRIORITY_GROUND_ROAD_SURFACE) continue;
+        const ownerSegment = originalOwner[index];
+        if (
+          ownerSegment !== SENTINEL_UINT32 &&
+          Math.abs(segmentIndex - ownerSegment) > LOCAL_TOPOLOGY_WINDOW_SEGMENTS
+        ) {
+          continue;
+        }
 
         const x = grid.columnToX(column);
         const unclampedT = ((x - x0) * dx + (y - y0) * dy) / segmentLengthSquared;
@@ -104,17 +109,10 @@ export function enforceContinuousFormationCoverageV3(
         const distanceSquared = distanceX * distanceX + distanceY * distanceY;
         if (distanceSquared > halfWidthSquared + 1e-9) continue;
 
-        const ownerSegment = buffers.segmentRank[index];
-        const topologyDistance = ownerSegment === SENTINEL_UINT32
-          ? 0
-          : Math.abs(segmentIndex - ownerSegment);
-        const existingTopologyDistance = bestTopologyDistance[index];
         const existingDistance = bestDistanceSquared[index];
         const existingSegment = bestSegment[index];
-        const wins = topologyDistance < existingTopologyDistance ||
-          (topologyDistance === existingTopologyDistance &&
-            (distanceSquared < existingDistance - 1e-9 ||
-              (Math.abs(distanceSquared - existingDistance) <= 1e-9 && segmentIndex < existingSegment)));
+        const wins = distanceSquared < existingDistance - 1e-9 ||
+          (Math.abs(distanceSquared - existingDistance) <= 1e-9 && segmentIndex < existingSegment);
         if (!wins) continue;
 
         // Pads keep the endpoint formation elevation constant. Inside the
@@ -134,7 +132,6 @@ export function enforceContinuousFormationCoverageV3(
         const formationZ = station0.formationZ +
           (station1.formationZ - station0.formationZ) * physicalT;
 
-        bestTopologyDistance[index] = topologyDistance;
         bestDistanceSquared[index] = distanceSquared;
         bestSegment[index] = segmentIndex;
         bestFormationZ[index] = formationZ;
