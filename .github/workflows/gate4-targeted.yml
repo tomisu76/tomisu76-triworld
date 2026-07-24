@@ -1,0 +1,28 @@
+name: Gate 4 Targeted
+
+on:
+  pull_request:
+    paths:
+      - 'src/beamng-v4/**'
+      - 'src/pipeline-v3/**'
+      - 'src/roads/**'
+      - 'artifacts/gate3-osm/**'
+      - '.github/workflows/gate4-targeted.yml'
+  workflow_dispatch:
+
+jobs:
+  gate4-targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run Gate 4 targeted tests
+        run: >-
+          npx vitest run
+          src/beamng-v4/sumo-road-source.test.ts
+          src/beamng-v4/osm-road-source.test.ts
+          src/roads/road-pipeline.test.ts
