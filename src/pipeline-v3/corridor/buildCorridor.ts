@@ -38,15 +38,17 @@ export function buildCorridorV3(
   }
 
   const formationHalfWidth = laneHalfWidth + shoulderWidth;
-  // Extended formation bed width (+1.5m safety grid zone beyond shoulder)
+  // Rasterize a flat formation safety zone beyond the physical shoulder so
+  // bilinear TerrainBlock sampling never blends shoulder vertices with
+  // untouched ground. Daylight slopes begin at this same outer boundary.
   const formationRasterHalfWidth = formationHalfWidth + safetyGridZoneMetres;
 
   // Determine canonical Side A vs Side B ONCE for the entire lane based on station 0
   const st0 = stations[0];
-  const fLeftX0 = st0.x + st0.normalX * formationHalfWidth;
-  const fLeftY0 = st0.y + st0.normalY * formationHalfWidth;
-  const fRightX0 = st0.x - st0.normalX * formationHalfWidth;
-  const fRightY0 = st0.y - st0.normalY * formationHalfWidth;
+  const fLeftX0 = st0.x + st0.normalX * formationRasterHalfWidth;
+  const fLeftY0 = st0.y + st0.normalY * formationRasterHalfWidth;
+  const fRightX0 = st0.x - st0.normalX * formationRasterHalfWidth;
+  const fRightY0 = st0.y - st0.normalY * formationRasterHalfWidth;
 
   const fLeftKey0 = `${Math.round(fLeftX0 * 1000)}:${Math.round(fLeftY0 * 1000)}`;
   const fRightKey0 = `${Math.round(fRightX0 * 1000)}:${Math.round(fRightY0 * 1000)}`;
@@ -61,12 +63,12 @@ export function buildCorridorV3(
     const st = stations[i];
     const stationMm = Math.round(st.station * 1000);
 
-    const fLeftX = st.x + st.normalX * formationHalfWidth;
-    const fLeftY = st.y + st.normalY * formationHalfWidth;
-    const fRightX = st.x - st.normalX * formationHalfWidth;
-    const fRightY = st.y - st.normalY * formationHalfWidth;
+    const fLeftX = st.x + st.normalX * formationRasterHalfWidth;
+    const fLeftY = st.y + st.normalY * formationRasterHalfWidth;
+    const fRightX = st.x - st.normalX * formationRasterHalfWidth;
+    const fRightY = st.y - st.normalY * formationRasterHalfWidth;
 
-    // Daylight slope starts at the outer edge of safety grid zone (+1.5m)
+    // Daylight slope starts at the outer edge of the safety grid zone.
     const daylightLeft = solveDaylightRayV3(st, formationRasterHalfWidth, true, grid, policy);
     const daylightRight = solveDaylightRayV3(st, formationRasterHalfWidth, false, grid, policy);
 
