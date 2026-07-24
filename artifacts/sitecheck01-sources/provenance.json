@@ -1,0 +1,182 @@
+{
+  "acquiredAtUtc": "2026-07-24T16:33:44.002Z",
+  "centerWgs84": {
+    "longitude": 18.25561213182195,
+    "latitude": 48.710782486104385,
+    "altitude": 0
+  },
+  "centerUtm34N": {
+    "easting": 298118.78667282435,
+    "northing": 5398939.857639751,
+    "elevation": 0,
+    "zone": 34
+  },
+  "boundsWgs84": {
+    "minLongitude": 18.248409273426407,
+    "minLatitude": 48.70601589730791,
+    "maxLongitude": 18.2628137197692,
+    "maxLatitude": 48.71554871105812
+  },
+  "osm": {
+    "url": "https://api.openstreetmap.org/api/0.6/map?bbox=18.248409273426,48.706015897308,18.262813719769,48.715548711058",
+    "bytes": 949940,
+    "sha256": "28d0a874c34c322da378f8599adf66697fec352b4901d0494ffeb1bec0936a84",
+    "nodeCount": 3307,
+    "wayCount": 423,
+    "relationCount": 28,
+    "roadNameChecks": {
+      "Partizánska": true,
+      "Trenčianska cesta": true,
+      "Ľudmily Podjavorinskej": true
+    },
+    "namesFound": [
+      "1. SPS",
+      "Autoservis ADM motors",
+      "Bánovce n.B.,ZŠ Partizánska",
+      "Bánovce n.Bebravou,SAD",
+      "Bánovce n.Bebravou,ZŠ Partizánska",
+      "Bánovce n.Bebravou,železničný nadjazd",
+      "Bánovce nad Bebravou",
+      "Bánovce nad Bebravou časť Biskupice",
+      "Bebravská niva",
+      "Bernolákova",
+      "Biskupice",
+      "Cesta I. triedy 9",
+      "Cesty I. triedy na Slovensku",
+      "Cez pole",
+      "Cimbal",
+      "Dub",
+      "Ferka Urbánka",
+      "Futbalové kabíny FK Spartak Bánovce nad Bebravou",
+      "Hokejový štadión",
+      "J. Kačku",
+      "K štadiónu",
+      "Ľudmily Podjavorinskej",
+      "Masé kitchen",
+      "MFC SPARTAK Bánovce nad Bebravou",
+      "Motomiro",
+      "Nitrianska niva",
+      "Partizánska",
+      "Podunajská pahorkatina",
+      "SAD Prievidza, a.s.",
+      "Sasinkova",
+      "Slovnaft",
+      "Strojovňa zimného štadiónu",
+      "Train 53XX",
+      "Train 53XX: Chynorany -> Trenčín",
+      "Train 53XX: Topoľčany -> Trenčín",
+      "Train 53XX: Trenčín -> Chynorany",
+      "Train 53XX: Trenčín -> Topoľčany",
+      "Trenčianska cesta",
+      "Tŕnie",
+      "Zrkadlo",
+      "ZŠ Partizánska",
+      "Železničné trate na Slovensku",
+      "Železničné trate na Slovensku podľa TTP"
+    ]
+  },
+  "orthophoto": {
+    "url": "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=18.248409273426%2C48.706015897308%2C18.262813719769%2C48.715548711058&bboxSR=4326&imageSR=4326&size=1024%2C1024&format=png&f=image",
+    "bytes": 690233,
+    "sha256": "6d24d68ca15407d9abbc43c8da80bfa3fbe1bf2a0c234c9bdffe186ae00797aa",
+    "transformApplied": "none"
+  },
+  "dem": {
+    "source": "AWS elevation-tiles-prod Terrarium",
+    "zoom": 14,
+    "tileCount": 12,
+    "tiles": [
+      {
+        "tileX": 9021,
+        "tileY": 5645,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9021/5645.png",
+        "bytes": 92631,
+        "sha256": "3ac7eda4a12719746f3f675ba9f76c84783a29448a726ac7ee359c030a9b2185"
+      },
+      {
+        "tileX": 9022,
+        "tileY": 5645,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9022/5645.png",
+        "bytes": 63480,
+        "sha256": "2d3575e42741c8e32a66bb4488d9e5b922af92471170254086e49130b03f218a"
+      },
+      {
+        "tileX": 9023,
+        "tileY": 5645,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9023/5645.png",
+        "bytes": 85260,
+        "sha256": "8ae1e8b7e6bf685b22cace84cf299586f679622a811992d03793edc2c7a7f2fd"
+      },
+      {
+        "tileX": 9024,
+        "tileY": 5645,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9024/5645.png",
+        "bytes": 90588,
+        "sha256": "25947983dbd850ada81fd9fcf51d30f9085f36b051e990ed3a493abb3e52c284"
+      },
+      {
+        "tileX": 9021,
+        "tileY": 5646,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9021/5646.png",
+        "bytes": 76168,
+        "sha256": "cbb6861d5625527eec70bae324dd0f6c1cf76830621b25c791821df9245492fe"
+      },
+      {
+        "tileX": 9022,
+        "tileY": 5646,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9022/5646.png",
+        "bytes": 56552,
+        "sha256": "f33eb5fbee40ce4eca3cd2bfeabe67235db55be15b97366f942850a2020e9218"
+      },
+      {
+        "tileX": 9023,
+        "tileY": 5646,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9023/5646.png",
+        "bytes": 88394,
+        "sha256": "e4afebdbb5a8691bc0e142e56f4d53c00bee31c31fcc0cb8da5e89d8e1b970c7"
+      },
+      {
+        "tileX": 9024,
+        "tileY": 5646,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9024/5646.png",
+        "bytes": 92693,
+        "sha256": "fc2673bb5f22764c7942c36ac442d6d2763ae21747eba13b9b2e1a5415a25aa0"
+      },
+      {
+        "tileX": 9021,
+        "tileY": 5647,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9021/5647.png",
+        "bytes": 57051,
+        "sha256": "28e5fb20e08f034b1b80563be0e820f60b8266c59b800cb03b418dc785318bf8"
+      },
+      {
+        "tileX": 9022,
+        "tileY": 5647,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9022/5647.png",
+        "bytes": 58611,
+        "sha256": "9deb0d786d6843904f669f90dade8792981a5c8af4e545a2353304fa56c732cd"
+      },
+      {
+        "tileX": 9023,
+        "tileY": 5647,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9023/5647.png",
+        "bytes": 84102,
+        "sha256": "ce8f2ba0d3a81f2ebce62fc61f55361a375abd84a967e06ece5e1b4eaf316536"
+      },
+      {
+        "tileX": 9024,
+        "tileY": 5647,
+        "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/14/9024/5647.png",
+        "bytes": 86092,
+        "sha256": "7c1bb8c1c227f5036e636f4e6061af8233938353aed7307d72d58fcf091bb327"
+      }
+    ]
+  },
+  "sumo": {
+    "available": true,
+    "created": true,
+    "status": 0,
+    "stdout": "Success.\r\n",
+    "stderr": "Warning: Discarding unknown compound 'usage.branch' in type 'railway.rail|usage.branch' (first occurrence for edge '142575479').\r\nWarning: Discarding unusable type 'waterway.stream' (first occurrence for edge '737855921').\r\nWarning: PT line in relation 14971975 with no stops ignored. Probably OSM file is incomplete.\r\nWarning: PT line in relation 14971976 with no stops ignored. Probably OSM file is incomplete.\r\nWarning: PT line in relation 14971977 with no stops ignored. Probably OSM file is incomplete.\r\nWarning: PT line in relation 14971978 with no stops ignored. Probably OSM file is incomplete.\r\nWarning: Could not find corresponding edge or compatible lane for free-floating pt stop '3726706904' (Bánovce n.B.,ZŠ Partizánska). Thus, it will be removed!\r\nWarning: Ambiguity in turnarounds computation at junction '13055810340'.\r\n"
+  }
+}

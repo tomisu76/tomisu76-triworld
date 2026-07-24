@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "siteId": "banovce-accident-site",
+  "purpose": "SITECHECK01 horizontal and vertical source alignment diagnostic",
+  "centerWgs84": {
+    "longitude": 18.25561213182195,
+    "latitude": 48.710782486104385,
+    "altitude": 0
+  },
+  "centerUtm34N": {
+    "easting": 298118.78667282435,
+    "northing": 5398939.857639751,
+    "elevation": 0,
+    "zone": 34
+  },
+  "crs": {
+    "horizontal": "EPSG:32634",
+    "geographic": "EPSG:4326"
+  },
+  "sizeMetres": 1024,
+  "squareSizeMetres": 1,
+  "textureSizePixels": 1024,
+  "boundsWgs84": {
+    "minLongitude": 18.248409273426407,
+    "minLatitude": 48.70601589730791,
+    "maxLongitude": 18.2628137197692,
+    "maxLatitude": 48.71554871105812
+  },
+  "cornersWgs84": {
+    "sw": {
+      "longitude": 18.24891132168074,
+      "latitude": 48.70601589730791,
+      "altitude": 0
+    },
+    "se": {
+      "longitude": 18.2628137197692,
+      "latitude": 48.706347260871695,
+      "altitude": 0
+    },
+    "nw": {
+      "longitude": 18.248409273426407,
+      "latitude": 48.7152172408568,
+      "altitude": 0
+    },
+    "ne": {
+      "longitude": 18.262314200827348,
+      "latitude": 48.71554871105812,
+      "altitude": 0
+    }
+  },
+  "orthophotoTransform": "none",
+  "orthophotoTransformEvidence": {
+    "diagnostic": "ORIENTATIONCHECK01",
+    "result": "A / NO IMAGE TRANSFORM",
+    "commit": "7e2e01622d644b875e81817a8464f056a890ed94"
+  },
+  "expectedRoadNames": [
+    "Partizánska",
+    "Trenčianska cesta",
+    "Ľudmily Podjavorinskej"
+  ],
+  "sourcePaths": {
+    "osm": "artifacts/sitecheck01-sources/banovce_accident_site.osm",
+    "sumoNet": "artifacts/sitecheck01-sources/banovce_accident_site.net.xml",
+    "orthophoto": "artifacts/sitecheck01-sources/orthophoto_raw_no_transform.png",
+    "demTileDirectory": "artifacts/sitecheck01-sources/dem-terrarium"
+  },
+  "constraints": {
+    "terrainDeformation": false,
+    "finalRoadMesh": false,
+    "accidentSimulation": false,
+    "imageFlipOrRotation": false
+  }
+}
