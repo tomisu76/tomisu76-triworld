@@ -31,7 +31,7 @@ const EXPECTED = {
   latitude: 48.710782486104385,
   longitude: 18.25561213182195,
   osmHash: '28d0a874c34c322da378f8599adf66697fec352b4901d0494ffeb1bec0936a84',
-  sumoHash: '52a86316e6c336df7e115c664cd420c8b93c341eda0bd3e09d3b65a90424a3a9',
+  sumoHash: '67b92f10232501fdbbe77f3bd266f9f8ac324bc7bb8e3c5ff4634c0ff1914e03',
   orthophotoHash: '6d24d68ca15407d9abbc43c8da80bfa3fbe1bf2a0c234c9bdffe186ae00797aa',
 };
 
@@ -45,9 +45,9 @@ async function main(): Promise<void> {
   const orthophotoPath = path.resolve(config.sourcePaths.orthophoto);
   const demRoot = path.resolve(config.sourcePaths.demTileDirectory);
 
-  verifyHash(osmPath, EXPECTED.osmHash, 'OSM');
-  verifyHash(sumoPath, EXPECTED.sumoHash, 'SUMO');
-  verifyHash(orthophotoPath, EXPECTED.orthophotoHash, 'orthophoto');
+  verifyCanonicalTextHash(osmPath, EXPECTED.osmHash, 'OSM');
+  verifyCanonicalTextHash(sumoPath, EXPECTED.sumoHash, 'SUMO');
+  verifyBinaryHash(orthophotoPath, EXPECTED.orthophotoHash, 'orthophoto');
 
   console.log('Building SITECHECK01 from authoritative principal SUMO centerlines...');
   console.log(`Centre: ${config.centerWgs84.latitude}, ${config.centerWgs84.longitude}`);
@@ -151,10 +151,31 @@ function validateConfig(config: SiteConfig): void {
   }
 }
 
-function verifyHash(filePath: string, expected: string, label: string): void {
-  const actual = createHash('sha256')
-    .update(fs.readFileSync(filePath))
-    .digest('hex');
+function verifyCanonicalTextHash(
+  filePath: string,
+  expected: string,
+  label: string,
+): void {
+  const canonicalText = fs.readFileSync(filePath, 'utf8')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+  verifyDigest(canonicalText, expected, label);
+}
+
+function verifyBinaryHash(
+  filePath: string,
+  expected: string,
+  label: string,
+): void {
+  verifyDigest(fs.readFileSync(filePath), expected, label);
+}
+
+function verifyDigest(
+  content: Uint8Array | string,
+  expected: string,
+  label: string,
+): void {
+  const actual = createHash('sha256').update(content).digest('hex');
   if (actual !== expected) {
     throw new Error(
       `SITECHECK01 rejected: authoritative ${label} hash mismatch; ` +
