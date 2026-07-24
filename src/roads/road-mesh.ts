@@ -69,11 +69,22 @@ export function buildEngineeredRoadMesh(
       const relativeZ = centerZ - elevation.anchorElevationMetres + formationClearance;
       const crossfallDrop = (st.roadWidth / 2) * st.crossfall;
       const edgeZ = relativeZ - crossfallDrop;
+      const laneCentreZ = (relativeZ + edgeZ) / 2;
+      const leftShoulderX = leftX + st.normalX * st.shoulderWidth;
+      const leftShoulderY = leftY + st.normalY * st.shoulderWidth;
+      const rightShoulderX = rightX - st.normalX * st.shoulderWidth;
+      const rightShoulderY = rightY - st.normalY * st.shoulderWidth;
 
-      // Order per station: ALWAYS left_i, right_i
+      // Order per station: left shoulder, road edge, lane centre, crown,
+      // right lane centre, road edge, shoulder.
       positions.push(
+        leftShoulderX, leftShoulderY, edgeZ,
         leftX, leftY, edgeZ,
+        (leftX + st.x) / 2, (leftY + st.y) / 2, laneCentreZ,
+        st.x, st.y, relativeZ,
+        (rightX + st.x) / 2, (rightY + st.y) / 2, laneCentreZ,
         rightX, rightY, edgeZ,
+        rightShoulderX, rightShoulderY, edgeZ,
       );
 
       if (i > 0) {
@@ -81,7 +92,7 @@ export function buildEngineeredRoadMesh(
       }
     }
 
-    // Build continuous quad ribbon for this road way
+    // Build six continuous quad strips for this road way.
     for (let i = 0; i < road.stations.length - 1; i++) {
       const stCurr = road.stations[i];
       const stNext = road.stations[i + 1];
@@ -89,16 +100,21 @@ export function buildEngineeredRoadMesh(
       // Skip duplicate / zero length stations
       if (Math.hypot(stNext.x - stCurr.x, stNext.y - stCurr.y) < 0.01) continue;
 
-      const idxLeftCurr = wayVertexStart + i * 2;
-      const idxRightCurr = idxLeftCurr + 1;
-      const idxLeftNext = idxLeftCurr + 2;
-      const idxRightNext = idxLeftCurr + 3;
+      const idxCurr = wayVertexStart + i * 7;
+      const idxNext = idxCurr + 7;
+      let segmentHasTriangles = false;
 
-      // Guarantee an unbroken, continuous ribbon across all adjacent station pairs
-      const t1OK = appendPositiveZTriangle(positions, indices, idxLeftCurr, idxRightCurr, idxRightNext);
-      const t2OK = appendPositiveZTriangle(positions, indices, idxLeftCurr, idxRightNext, idxLeftNext);
+      for (let strip = 0; strip < 6; strip++) {
+        const leftCurr = idxCurr + strip;
+        const rightCurr = leftCurr + 1;
+        const leftNext = idxNext + strip;
+        const rightNext = leftNext + 1;
+        const t1OK = appendPositiveZTriangle(positions, indices, leftCurr, rightCurr, rightNext);
+        const t2OK = appendPositiveZTriangle(positions, indices, leftCurr, rightNext, leftNext);
+        segmentHasTriangles ||= t1OK || t2OK;
+      }
 
-      if (t1OK || t2OK) {
+      if (segmentHasTriangles) {
         totalSegments += 1;
       }
     }
