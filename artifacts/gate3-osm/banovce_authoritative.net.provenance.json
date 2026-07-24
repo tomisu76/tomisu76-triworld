@@ -1,0 +1,20 @@
+{
+  "sourceOsmPath": "artifacts/gate3-osm/banovce_authoritative.osm",
+  "sourceOsmWayId": 109459194,
+  "sourceOsmSha256": "bde1ef6efa5113b1258d286c2252b16ab54193b87ba80525e0e0512c8cf40530",
+  "netconvertVersion": "Eclipse SUMO netconvert 1.27.1",
+  "netconvertCommand": "netconvert --osm-files artifacts/gate3-osm/banovce_authoritative.osm --output-file artifacts/gate3-osm/banovce_authoritative.net.xml --output.street-names true --no-turnarounds true",
+  "netSha256": "590c210a889269e2fc36819e634b615c84f039af57b7ae97b397fc8e008ea8d1",
+  "osmWayToSumoEdges": [
+    "-109459194#0",
+    "-109459194#1",
+    "109459194#0",
+    "109459194#1"
+  ],
+  "lanes": [
+    { "id": "-109459194#0_0", "shapePointCount": 22 },
+    { "id": "-109459194#1_0", "shapePointCount": 12 },
+    { "id": "109459194#0_0", "shapePointCount": 22 },
+    { "id": "109459194#1_0", "shapePointCount": 12 }
+  ]
+}

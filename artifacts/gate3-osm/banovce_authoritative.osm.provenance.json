@@ -1,8 +1,8 @@
 {
-  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=18.345908174257257%2C48.720901760622816%2C18.359333701239922%2C48.73042365069897",
-  "downloadedAtUtc": "2026-07-24T00:08:17.4786939Z",
-  "format": "OSM API v0.6 map.json",
-  "sha256": "b004e894cf8286f1eeac41bbb40025b38400bfe498842d9583ff62c0fc41d25c",
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map?bbox=18.345908174257257,48.720901760622816,18.359333701239922,48.73042365069897",
+  "downloadedAtUtc": "2026-07-24T00:10:12.9377523Z",
+  "format": "OSM API v0.6 XML",
+  "sha256": "bde1ef6efa5113b1258d286c2252b16ab54193b87ba80525e0e0512c8cf40530",
   "wayId": 109459194,
   "wayNodeReferenceCount": 33,
   "missingWayNodeReferences": 0,
