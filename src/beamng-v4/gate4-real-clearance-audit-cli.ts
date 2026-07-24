@@ -16,6 +16,7 @@ const MAX_HEIGHT = 500;
 const OSM_WAY_ID = 109459194;
 const PAVEMENT_DEPTH_METRES = 0.30;
 const VERTICES_PER_STATION = 7;
+const WORLD_OFFSET_METRES = ((SIZE - 1) * SQUARE_SIZE) / 2; // 511.5 - correct terrain sample center
 const ROLES = [
   'left-shoulder',
   'left-road-edge',
@@ -218,17 +219,17 @@ async function main(): Promise<void> {
     verticalCurves: [],
   };
   const elevation: ElevationModel = {
-    source: 'Gate 4 real DEM frame audit',
-    zoom: 0,
-    anchorElevationMetres: 0,
-    sampleAbsoluteLocal: (x, y) => sampleTerrain(x + SIZE / 2, y + SIZE / 2),
-    sampleRelativeLocal: (x, y) => sampleTerrain(x + SIZE / 2, y + SIZE / 2),
-  };
-  const engineered = buildEngineeredRoadMesh(
-    [designedRoad],
-    new SpatialRoadIndex(SIZE / 2, [designedRoad]),
-    elevation,
-  );
+      source: 'Gate 4 real DEM frame audit',
+      zoom: 0,
+      anchorElevationMetres: 0,
+      sampleAbsoluteLocal: (x, y) => sampleTerrain(x + WORLD_OFFSET_METRES, y + WORLD_OFFSET_METRES),
+      sampleRelativeLocal: (x, y) => sampleTerrain(x + WORLD_OFFSET_METRES, y + WORLD_OFFSET_METRES),
+    };
+    const engineered = buildEngineeredRoadMesh(
+      [designedRoad],
+      new SpatialRoadIndex(WORLD_OFFSET_METRES, [designedRoad]),
+      elevation,
+    );
 
   console.log('GATE4_REAL_GEOMETRY', JSON.stringify({
     stationCount: stations.length,
@@ -240,21 +241,21 @@ async function main(): Promise<void> {
   }));
 
   auditFrame(
-    'transformer-half-extent-512.0',
-    SIZE / 2,
-    engineered.mesh.positions,
-    stations,
-    profileAnchorElevation,
-    sampleTerrain,
-  );
-  auditFrame(
-    'terrain-sample-centre-511.5',
-    (SIZE - 1) / 2,
-    engineered.mesh.positions,
-    stations,
-    profileAnchorElevation,
-    sampleTerrain,
-  );
+      'transformer-half-extent-512.0',
+      SIZE / 2,
+      engineered.mesh.positions,
+      stations,
+      profileAnchorElevation,
+      sampleTerrain,
+    );
+    auditFrame(
+      'terrain-sample-centre-511.5',
+      WORLD_OFFSET_METRES,
+      engineered.mesh.positions,
+      stations,
+      profileAnchorElevation,
+      sampleTerrain,
+    );
 }
 
 main().catch((error: unknown) => {

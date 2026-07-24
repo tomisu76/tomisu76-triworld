@@ -13,12 +13,12 @@ import {
   parseDaeVerticesAndAuditClearance,
   type RoadSurfaceMeshResult,
 } from './road-mesh-exporter';
-import { resolveAuthoritativeSumoRoadAlignment } from './sumo-road-source';
-
 const SIZE = 1024;
+const SQUARE_SIZE = 1.0;
 const ROAD_WIDTH_METRES = 8;
 const FORMATION_DEPTH_METRES = 0.30;
 const VERTICES_PER_STATION = 7;
+const WORLD_OFFSET_METRES = ((SIZE - 1) * SQUARE_SIZE) / 2; // 511.5 - correct terrain sample center
 const CROSS_SECTION_ROLES = [
   'left-shoulder',
   'left-road-edge',
@@ -73,8 +73,8 @@ function adaptForDae(
     const source = vertex * 3;
     const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
     const crossSectionIndex = vertex % VERTICES_PER_STATION;
-    const x = engineered.mesh.positions[source] + SIZE / 2;
-    const y = engineered.mesh.positions[source + 1] + SIZE / 2;
+    const x = engineered.mesh.positions[source] + WORLD_OFFSET_METRES;
+        const y = engineered.mesh.positions[source + 1] + WORLD_OFFSET_METRES;
     const z = engineered.mesh.positions[source + 2];
     positions[source] = x;
     positions[source + 1] = y;
@@ -234,18 +234,18 @@ describe('Gate 4 coupled SUMO road and terrain', () => {
       totalFillVolumeEstimate: 0,
       verticalCurves: [],
     };
-    const elevation: ElevationModel = {
-      source: 'deterministic Gate 4 coupled test terrain',
-      zoom: 0,
-      anchorElevationMetres: 0,
-      sampleAbsoluteLocal: (x, y) => sampleTerrain(x + SIZE / 2, y + SIZE / 2),
-      sampleRelativeLocal: (x, y) => sampleTerrain(x + SIZE / 2, y + SIZE / 2),
-    };
-    const engineered = buildEngineeredRoadMesh(
-      [designedRoad],
-      new SpatialRoadIndex(SIZE / 2, [designedRoad]),
-      elevation,
-    );
+        const elevation: ElevationModel = {
+          source: 'deterministic Gate 4 coupled test terrain',
+          zoom: 0,
+          anchorElevationMetres: 0,
+          sampleAbsoluteLocal: (x, y) => sampleTerrain(x + WORLD_OFFSET_METRES, y + WORLD_OFFSET_METRES),
+          sampleRelativeLocal: (x, y) => sampleTerrain(x + WORLD_OFFSET_METRES, y + WORLD_OFFSET_METRES),
+        };
+        const engineered = buildEngineeredRoadMesh(
+          [designedRoad],
+          new SpatialRoadIndex(WORLD_OFFSET_METRES, [designedRoad]),
+          elevation,
+        );
     const stationValues = stations.map((station) => station.station);
     const mesh = adaptForDae(engineered, stationValues, sampleTerrain);
     const dae = exportRoadMeshToDae(mesh, 'triworld_asphalt');
