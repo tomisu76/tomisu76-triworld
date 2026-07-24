@@ -14,9 +14,6 @@ import {
   type RoadSurfaceMeshResult,
 } from './road-mesh-exporter';
 import { buildBeamNgZipPackage } from './zip-builder';
-import { resampleSumoShapeGlobal, type SumoPlanStation } from '../pipeline-v3/sumo/SumoGeometryV3';
-import { designVerticalProfileV3 } from '../pipeline-v3/civil/designVerticalProfile';
-import { buildCorridorV3 } from '../pipeline-v3/corridor/buildCorridor';
 import type { ElevationModel } from '../elevation';
 import { buildEngineeredRoadMesh } from '../roads/road-mesh';
 import { getRoadDesignPolicy } from '../roads/road-design-policy';
@@ -26,8 +23,18 @@ import type { DesignedRoad } from '../roads/vertical-alignment';
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const MAX_HEIGHT = 500.0;
-const LEVEL_NAME = 'triworld_v4_gate4_nativev3_1';
+const LEVEL_NAME = 'triworld_v4_gate4_nativev3_real1';
 const TRACI_PORT = 8873;
+const PAVEMENT_DEPTH_METRES = 0.30;
+const VERTICES_PER_STATION = 7;
+const CROWN_VERTEX_INDEX = 3;
+const TEXTURE_REPEAT_METRES = 5.0;
+const AUTHORITATIVE_SUMO_EDGE_IDS = new Set([
+  '-109459194#0',
+  '-109459194#1',
+  '109459194#0',
+  '109459194#1',
+]);
 
 function sha256(buf: Uint8Array): string {
   return createHash('sha256').update(buf).digest('hex');
@@ -88,17 +95,27 @@ function adaptEngineeredMeshForDae(
   stationValues: readonly number[],
   widthMetres: number,
 ): RoadSurfaceMeshResult {
+  const vertexCount = engineered.mesh.positions.length / 3;
+  if (vertexCount !== stationValues.length * VERTICES_PER_STATION) {
+    throw new Error(
+      `Engineered mesh layout mismatch: expected ${stationValues.length * VERTICES_PER_STATION} ` +
+      `vertices for ${stationValues.length} stations, received ${vertexCount}.`,
+    );
+  }
+
   const positions = new Float32Array(engineered.mesh.positions.length);
   const normals = new Float32Array(engineered.mesh.positions.length);
-  const uvs = new Float32Array((engineered.mesh.positions.length / 3) * 2);
+  const uvs = new Float32Array(vertexCount * 2);
   let minimumClearance = Number.POSITIVE_INFINITY;
   let maximumClearance = Number.NEGATIVE_INFINITY;
   let totalClearance = 0;
   let negativeCount = 0;
   let maxAdjacentZJumpMetres = 0;
 
-  for (let vertex = 0; vertex < engineered.mesh.positions.length / 3; vertex++) {
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
     const source = vertex * 3;
+    const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
+    const crossSectionIndex = vertex % VERTICES_PER_STATION;
     const x = engineered.mesh.positions[source] + SIZE / 2;
     const y = engineered.mesh.positions[source + 1] + SIZE / 2;
     const z = engineered.mesh.positions[source + 2];
@@ -106,8 +123,8 @@ function adaptEngineeredMeshForDae(
     positions[source + 1] = y;
     positions[source + 2] = z;
     normals[source + 2] = 1;
-    uvs[vertex * 2] = vertex % 2;
-    uvs[vertex * 2 + 1] = stationValues[Math.floor(vertex / 2)] / 5;
+    uvs[vertex * 2] = crossSectionIndex / (VERTICES_PER_STATION - 1);
+    uvs[vertex * 2 + 1] = stationValues[stationIndex] / TEXTURE_REPEAT_METRES;
 
     const clearance = z - sampleTerrainElevation(x, y);
     minimumClearance = Math.min(minimumClearance, clearance);
@@ -117,12 +134,13 @@ function adaptEngineeredMeshForDae(
   }
 
   for (let station = 1; station < stationValues.length; station++) {
-    const previousZ = (positions[(station - 1) * 6 + 2] + positions[(station - 1) * 6 + 5]) / 2;
-    const currentZ = (positions[station * 6 + 2] + positions[station * 6 + 5]) / 2;
+    const previousCrownVertex = (station - 1) * VERTICES_PER_STATION + CROWN_VERTEX_INDEX;
+    const currentCrownVertex = station * VERTICES_PER_STATION + CROWN_VERTEX_INDEX;
+    const previousZ = positions[previousCrownVertex * 3 + 2];
+    const currentZ = positions[currentCrownVertex * 3 + 2];
     maxAdjacentZJumpMetres = Math.max(maxAdjacentZJumpMetres, Math.abs(currentZ - previousZ));
   }
 
-  const vertexCount = positions.length / 3;
   return {
     positions,
     normals,
@@ -150,31 +168,33 @@ interface SumoLaneShape {
   points: Array<{ x: number; y: number }>;
 }
 
+function readXmlAttribute(tag: string, attribute: string): string | undefined {
+  return tag.match(new RegExp(`\\b${attribute}="([^"]+)"`))?.[1];
+}
+
 function parseSumoNetXmlLanes(netXmlPath: string): SumoLaneShape[] {
   const content = fs.readFileSync(netXmlPath, 'utf-8');
   const lanes: SumoLaneShape[] = [];
 
-  const edgeRegex = /<edge id="([^"]+)"[^>]*>([\s\S]*?)<\/edge>/g;
-  let edgeMatch;
+  const edgeRegex = /<edge\b([^>]*)>([\s\S]*?)<\/edge>/g;
+  let edgeMatch: RegExpExecArray | null;
 
   while ((edgeMatch = edgeRegex.exec(content)) !== null) {
-    const edgeId = edgeMatch[1];
-    if (edgeId.startsWith(':')) continue; // Skip internal junction edges for main route
+    const edgeId = readXmlAttribute(edgeMatch[1], 'id');
+    if (!edgeId || edgeId.startsWith(':')) continue;
 
-    const edgeContent = edgeMatch[2];
-    const laneRegex = /<lane id="([^"]+)"[^>]*width="([^"]+)"[^>]*shape="([^"]+)"/g;
-    let laneMatch;
+    const laneRegex = /<lane\b([^>]*?)\/>/g;
+    let laneMatch: RegExpExecArray | null;
+    while ((laneMatch = laneRegex.exec(edgeMatch[2])) !== null) {
+      const laneId = readXmlAttribute(laneMatch[1], 'id');
+      const shape = readXmlAttribute(laneMatch[1], 'shape');
+      if (!laneId || !shape) continue;
 
-    while ((laneMatch = laneRegex.exec(edgeContent)) !== null) {
-      const laneId = laneMatch[1];
-      const width = parseFloat(laneMatch[2]);
-      const shapeStr = laneMatch[3];
-
-      const points = shapeStr.trim().split(/\s+/).map((pair) => {
+      const width = Number(readXmlAttribute(laneMatch[1], 'width') ?? 3.0);
+      const points = shape.trim().split(/\s+/).map((pair) => {
         const [xStr, yStr] = pair.split(',');
-        return { x: parseFloat(xStr), y: parseFloat(yStr) };
+        return { x: Number(xStr), y: Number(yStr) };
       });
-
       lanes.push({ laneId, edgeId, width, points });
     }
   }
@@ -185,18 +205,25 @@ function parseSumoNetXmlLanes(netXmlPath: string): SumoLaneShape[] {
 async function main(): Promise<void> {
   console.log(`Building TriWorld V4 Gate 4 Native Pipeline V3 Level: ${LEVEL_NAME}...`);
 
-  // 1. Locate and inspect SUMO network file
-  const sumoNetPath = path.resolve('src/beamng-v4/fixtures/banovce_clean.net.xml');
-  console.log(`SUMO Network file loaded: ${sumoNetPath}`);
+  // 1. Load the authoritative SUMO network for provenance and later AI routing.
+  const sumoNetPath = path.resolve('artifacts/gate3-osm/banovce_authoritative.net.xml');
+  const targetSumoLanes = parseSumoNetXmlLanes(sumoNetPath)
+    .filter((lane) => AUTHORITATIVE_SUMO_EDGE_IDS.has(lane.edgeId));
+  const usedLaneIds = targetSumoLanes.map((lane) => lane.laneId);
+  const usedEdgeIds = Array.from(new Set(targetSumoLanes.map((lane) => lane.edgeId)));
 
-  const sumoLanes = parseSumoNetXmlLanes(sumoNetPath);
-  const usedLaneIds = sumoLanes.map((l) => l.laneId);
-  const usedEdgeIds = Array.from(new Set(sumoLanes.map((l) => l.edgeId)));
+  if (usedEdgeIds.length !== AUTHORITATIVE_SUMO_EDGE_IDS.size || targetSumoLanes.length !== 4) {
+    throw new Error(
+      `Authoritative SUMO mapping incomplete: expected four edges and four lanes for OSM way 109459194, ` +
+      `received ${usedEdgeIds.length} edges and ${targetSumoLanes.length} lanes.`,
+    );
+  }
 
-  console.log(`SUMO Network Loaded: ${usedEdgeIds.length} edges (${usedEdgeIds.join(', ')}), ${usedLaneIds.length} lanes (${usedLaneIds.join(', ')}).`);
-  console.log(`TraCI Port 8873 verified connected.`);
+  console.log(
+    `Authoritative SUMO network loaded: ${usedEdgeIds.join(', ')}; lanes ${usedLaneIds.join(', ')}.`,
+  );
 
-  // 2. Build real-world DEM terrain
+  // 2. Build real-world DEM terrain.
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
     squareSize: SQUARE_SIZE,
@@ -209,18 +236,24 @@ async function main(): Promise<void> {
     throw new Error('Gate 4 rejected: DEM download failed and analytic fallback was used.');
   }
 
-  // 3. Select primary road alignment
+  // 3. Resolve the same authoritative OSM way in the accepted Gate 3 map frame.
+  // SUMO carries the matching AI topology; a later isolated bridge will replace
+  // this horizontal source only after its UTM/netOffset transform is audited.
   const road = await fetchPrimaryOsmRoadAlignment(sourceTerrain.transformer, {
     minimumLengthMetres: 80,
     minimumInsetMetres: 12,
   });
+
+  if (road.wayId !== 109459194) {
+    throw new Error(`Gate 4 rejected: expected OSM way 109459194, selected ${road.wayId}.`);
+  }
 
   console.log(
     `OSM road selected: way ${road.wayId}, fragment ${road.fragmentIndex}, ` +
     `${road.name ?? road.highway}, ${road.pointCount} points, ${road.lengthMetres.toFixed(1)}m`,
   );
 
-  // 4. Run Pipeline V3 Coupled Corridor
+  // 4. Run Pipeline V3 with a true 0.30m subgrade below the designed surface.
   const corridor = applyCoupledRoadTerrainCorridor(
     sourceTerrain.rawElevations,
     SIZE,
@@ -230,6 +263,7 @@ async function main(): Promise<void> {
       roadShapeCentered: road.pointsCentered,
       roadSourceId: `osm-way-${road.wayId}-fragment-${road.fragmentIndex}`,
       laneWidth: road.laneWidthMetres,
+      formationDepthMetres: PAVEMENT_DEPTH_METRES,
     },
   );
 
@@ -248,15 +282,14 @@ async function main(): Promise<void> {
     SIZE,
     SQUARE_SIZE,
   );
-
   const baseMarkers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
 
-  // 5. Native Pipeline V3 Road Mesh Export
+  // 5. Export the authoritative seven-point designed road surface.
   const stations = corridor.v3Result.stations;
   const designPolicy = getRoadDesignPolicy(road.highway);
   const halfWidth = road.laneWidthMetres / 2;
   const engineeredElevation: ElevationModel = {
-    source: 'Gate 4 working terrain',
+    source: 'Gate 4 subgrade terrain',
     zoom: 0,
     anchorElevationMetres: 0,
     sampleAbsoluteLocal: (x, y) => sampleTerrainElevation(x + SIZE / 2, y + SIZE / 2),
@@ -314,36 +347,41 @@ async function main(): Promise<void> {
   const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
   const asphaltPng = generateAsphaltTexturePng(256);
 
-  // 6. DAE Audit vs Pipeline V3 surface & subgrade
+  // 6. Audit the exact exported DAE against the final subgrade terrain.
   const daeAudit = parseDaeVerticesAndAuditClearance(roadDae, sampleTerrainElevation);
+  const crossfallDrop = Math.abs((road.laneWidthMetres / 2) * designPolicy.crossfall);
+  const minimumAllowedClearance = PAVEMENT_DEPTH_METRES - crossfallDrop - 0.05;
+  const maximumAllowedClearance = PAVEMENT_DEPTH_METRES + 0.05;
 
   console.log(`Road Mesh V3 generated: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.segmentCount} segments.`);
-  console.log(`Pipeline V3 DAE Audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}.`);
-  console.log(`Max clearance vertex: (${daeAudit.maxClearanceVertex.x.toFixed(2)}, ${daeAudit.maxClearanceVertex.y.toFixed(2)}, ${daeAudit.maxClearanceVertex.z.toFixed(2)}) clearance=${daeAudit.maxClearanceVertex.clearance.toFixed(3)}m.`);
-  console.log(`Max adjacent Z step: ${roadMesh.clearanceStats.maxAdjacentZJumpMetres}m.`);
+  console.log(`Pipeline V3 DAE subgrade audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}.`);
+  console.log(`Max adjacent crown Z step: ${roadMesh.clearanceStats.maxAdjacentZJumpMetres}m.`);
 
   if (daeAudit.negativeCount > 0) {
     throw new Error(`Gate 4 rejected: ${daeAudit.negativeCount} negative-clearance vertices detected in DAE.`);
   }
-
-  if (daeAudit.maxClearance > 0.080) {
-    throw new Error(`Gate 4 rejected: Max DAE clearance ${daeAudit.maxClearance}m exceeds limit 0.080m.`);
+  if (daeAudit.minClearance < minimumAllowedClearance) {
+    throw new Error(
+      `Gate 4 rejected: Min DAE clearance ${daeAudit.minClearance}m is below engineered ` +
+      `subgrade limit ${minimumAllowedClearance.toFixed(3)}m.`,
+    );
+  }
+  if (daeAudit.maxClearance > maximumAllowedClearance) {
+    throw new Error(
+      `Gate 4 rejected: Max DAE clearance ${daeAudit.maxClearance}m exceeds engineered ` +
+      `subgrade limit ${maximumAllowedClearance.toFixed(3)}m.`,
+    );
   }
 
   const debugMarkers: Array<Record<string, unknown>> = [...baseMarkers];
   const halfGrid = SIZE / 2;
-
   for (let i = 0; i < stations.length; i += 25) {
     const st = stations[i];
-    const wx = st.x + halfGrid;
-    const wy = st.y + halfGrid;
-    const wz = sampleTerrainElevation(wx, wy) + 0.5;
-
     debugMarkers.push({
       name: `station_marker_${Math.round(st.station)}m`,
       class: 'TSStatic',
       shapeName: 'core/art/shapes/octahedron.dae',
-      position: [wx, wy, wz],
+      position: [st.x + halfGrid, st.y + halfGrid, st.surfaceZ + 0.5],
       rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
       scale: [0.5, 0.5, 0.5],
     });
@@ -353,15 +391,14 @@ async function main(): Promise<void> {
     transformer: sourceTerrain.transformer,
     textureSize: SIZE,
   });
-
   if (!isRealSatellite) {
     throw new Error('Gate 4 rejected: Satellite orthophoto download failed.');
   }
 
   const levelFiles = generateLevelPackageFiles(artifact, {
     levelName: LEVEL_NAME,
-    title: 'TriWorld V4 Native Gate 4 — Native Pipeline V3 Road Mesh',
-    description: 'Native BeamNG level built with real DEM terrain, 180-deg rotated satellite orthophoto, and engineered SUMO/Pipeline V3 3D asphalt road mesh object.',
+    title: 'TriWorld V4 Native Gate 4 — Engineered Road and Subgrade',
+    description: 'Native BeamNG level built with real DEM terrain, accepted orthophoto, authoritative OSM/SUMO provenance, a 0.30m subgrade, and a seven-point engineered asphalt road surface.',
     extraMarkers: debugMarkers,
     diffusePng,
     normalPng: undefined,
@@ -375,14 +412,13 @@ async function main(): Promise<void> {
   const zipPath = path.join(distDir, `${LEVEL_NAME}.zip`);
   const manifestPath = path.join(distDir, `${LEVEL_NAME}.manifest.json`);
 
-  const manifest = await buildBeamNgZipPackage(
+  await buildBeamNgZipPackage(
     artifact,
     levelFiles,
     zipPath,
     manifestPath,
     LEVEL_NAME,
   );
-
   const zipHash = hashFile(zipPath);
 
   const targetModsPath = path.join(
@@ -392,13 +428,10 @@ async function main(): Promise<void> {
     'current',
     'mods',
   );
-
   fs.mkdirSync(targetModsPath, { recursive: true });
   const installedZipPath = path.join(targetModsPath, `${LEVEL_NAME}.zip`);
   fs.copyFileSync(zipPath, installedZipPath);
-
   const installedZipHash = hashFile(installedZipPath);
-
   if (zipHash !== installedZipHash) {
     throw new Error('Gate 4 rejected: Source ZIP and installed ZIP SHA-256 mismatch.');
   }
@@ -406,45 +439,57 @@ async function main(): Promise<void> {
   const reportJsonPath = path.join(distDir, `${LEVEL_NAME}_report.json`);
   const buildReport = {
     levelName: LEVEL_NAME,
+    formationDepthMetres: PAVEMENT_DEPTH_METRES,
     sumoNetPath,
     sumoEdges: usedEdgeIds,
-    sumoLanes: usedLaneIds,
+    sumoLanes: targetSumoLanes.map((lane) => ({
+      laneId: lane.laneId,
+      edgeId: lane.edgeId,
+      width: lane.width,
+      shapePointCount: lane.points.length,
+    })),
     traciPort: TRACI_PORT,
+    traciVerifiedByThisBuild: false,
+    sumoGeometryUsedForRoadSurface: false,
     roadWayId: road.wayId,
     roadLengthMetres: road.lengthMetres,
     roadWidthMetres: road.laneWidthMetres,
     roadMeshStats: {
+      verticesPerStation: VERTICES_PER_STATION,
       vertexCount: roadMesh.vertexCount,
       triangleCount: roadMesh.triangleCount,
       segmentCount: roadMesh.segmentCount,
       clearanceStats: roadMesh.clearanceStats,
     },
     daeRuntimeAudit: daeAudit,
+    clearanceAcceptanceRange: {
+      minimumMetres: Number(minimumAllowedClearance.toFixed(3)),
+      maximumMetres: Number(maximumAllowedClearance.toFixed(3)),
+    },
     zipPath,
     zipHash,
     installedZipPath,
     installedZipHash,
     acceptance: {
       negativeClearanceCountZero: daeAudit.negativeCount === 0,
-      minClearancePositive: daeAudit.minClearance >= 0.035,
-      maxClearanceBounded: daeAudit.maxClearance <= 0.080,
+      minSubgradeClearanceMet: daeAudit.minClearance >= minimumAllowedClearance,
+      maxSubgradeClearanceMet: daeAudit.maxClearance <= maximumAllowedClearance,
       noZJumpAboveLimit: roadMesh.clearanceStats.maxAdjacentZJumpMetres <= 0.35,
+      sevenVerticesPerStation: roadMesh.vertexCount === stations.length * VERTICES_PER_STATION,
       zipHashesMatch: zipHash === installedZipHash,
       realDemUsed: true,
       realOsmRoadUsed: true,
-      sumoNetUsed: true,
-      traciVerified: true,
+      authoritativeSumoNetLoaded: true,
     },
   };
-
   fs.writeFileSync(reportJsonPath, JSON.stringify(buildReport, null, 2));
 
-  console.log(`GATE 4 NATIVE PIPELINE V3 BUILD SUCCESSFUL`);
+  console.log('GATE 4 NATIVE PIPELINE V3 BUILD SUCCESSFUL');
   console.log(`Level: ${LEVEL_NAME}`);
   console.log(`SUMO Edges: ${usedEdgeIds.join(', ')}`);
   console.log(`SUMO Lanes: ${usedLaneIds.join(', ')}`);
   console.log(`Road Mesh: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.lengthMetres.toFixed(1)}m length`);
-  console.log(`DAE Audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}`);
+  console.log(`DAE subgrade audit: min=${daeAudit.minClearance}m, max=${daeAudit.maxClearance}m, mean=${daeAudit.meanClearance}m, negativeCount=${daeAudit.negativeCount}`);
   console.log(`ZIP: ${zipPath}`);
   console.log(`Installed Mod: ${installedZipPath}`);
   console.log(`ZIP SHA-256: ${zipHash}`);
