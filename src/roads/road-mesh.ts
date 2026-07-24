@@ -47,8 +47,6 @@ export function buildEngineeredRoadMesh(
   let totalSegments = 0;
   let totalLength = 0;
 
-  const formationClearance = 0.05; // 5cm above formation bed
-
   for (const road of roads) {
     // Specification 1: KEEP EVERY OSM WAY SEPARATE
     if (road.stations.length < 2) continue;
@@ -63,10 +61,12 @@ export function buildEngineeredRoadMesh(
       const rightX = st.rightX;
       const rightY = st.rightY;
 
-      const centerZ = road.tunnel
+      // The designed road profile is authoritative. The corridor sampler is
+      // retained only as a defensive fallback for malformed legacy stations.
+      const centerZ = Number.isFinite(st.designZ)
         ? st.designZ
         : sampleCorridorElevation(st.x, st.y, elevation, spatialIndex);
-      const relativeZ = centerZ - elevation.anchorElevationMetres + formationClearance;
+      const relativeZ = centerZ - elevation.anchorElevationMetres;
       const crossfallDrop = (st.roadWidth / 2) * st.crossfall;
       const edgeZ = relativeZ - crossfallDrop;
       const laneCentreZ = (relativeZ + edgeZ) / 2;
