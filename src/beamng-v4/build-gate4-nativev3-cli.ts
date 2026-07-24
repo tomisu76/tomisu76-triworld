@@ -33,6 +33,10 @@ const CROWN_VERTEX_INDEX = 3;
 const TEXTURE_REPEAT_METRES = 5.0;
 const MINIMUM_ROAD_INSET_METRES = 12;
 const MINIMUM_ROAD_LENGTH_METRES = 80;
+// TerrainGridV3 samples an even N×N heightfield around (N - 1) / 2.
+// Using SIZE / 2 would shift every DAE road vertex by half a cell relative
+// to the modified TerrainBlock and creates false cut/fill clearances on real DEM.
+const WORLD_SAMPLE_CENTER = ((SIZE - 1) * SQUARE_SIZE) / 2;
 
 function sha256(buf: Uint8Array): string {
   return createHash('sha256').update(buf).digest('hex');
@@ -114,8 +118,8 @@ function adaptEngineeredMeshForDae(
     const source = vertex * 3;
     const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
     const crossSectionIndex = vertex % VERTICES_PER_STATION;
-    const x = engineered.mesh.positions[source] + SIZE / 2;
-    const y = engineered.mesh.positions[source + 1] + SIZE / 2;
+    const x = engineered.mesh.positions[source] + WORLD_SAMPLE_CENTER;
+    const y = engineered.mesh.positions[source + 1] + WORLD_SAMPLE_CENTER;
     const z = engineered.mesh.positions[source + 2];
     positions[source] = x;
     positions[source + 1] = y;
@@ -164,7 +168,6 @@ function createStationMarkers(
   profileAnchorElevation: number,
 ): LevelMarker[] {
   const markers: LevelMarker[] = [];
-  const halfGrid = SIZE / 2;
   for (let index = 0; index < stations.length; index += 25) {
     const station = stations[index];
     markers.push({
@@ -172,8 +175,8 @@ function createStationMarkers(
       class: 'TSStatic',
       __parent: 'MissionGroup',
       position: [
-        station.x + halfGrid,
-        station.y + halfGrid,
+        station.x + WORLD_SAMPLE_CENTER,
+        station.y + WORLD_SAMPLE_CENTER,
         station.surfaceZ + profileAnchorElevation + 0.5,
       ],
       rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
@@ -270,8 +273,14 @@ async function main(): Promise<void> {
     source: 'Gate 4 SUMO-coupled subgrade terrain',
     zoom: 0,
     anchorElevationMetres: 0,
-    sampleAbsoluteLocal: (x, y) => sampleTerrainElevation(x + SIZE / 2, y + SIZE / 2),
-    sampleRelativeLocal: (x, y) => sampleTerrainElevation(x + SIZE / 2, y + SIZE / 2),
+    sampleAbsoluteLocal: (x, y) => sampleTerrainElevation(
+      x + WORLD_SAMPLE_CENTER,
+      y + WORLD_SAMPLE_CENTER,
+    ),
+    sampleRelativeLocal: (x, y) => sampleTerrainElevation(
+      x + WORLD_SAMPLE_CENTER,
+      y + WORLD_SAMPLE_CENTER,
+    ),
   };
   const designedRoad: DesignedRoad = {
     id: roadSourceId,
@@ -314,7 +323,7 @@ async function main(): Promise<void> {
 
   const engineeredResult = buildEngineeredRoadMesh(
     [designedRoad],
-    new SpatialRoadIndex(SIZE / 2, [designedRoad]),
+    new SpatialRoadIndex(WORLD_SAMPLE_CENTER, [designedRoad]),
     engineeredElevation,
   );
   const roadMesh = adaptEngineeredMeshForDae(
@@ -433,6 +442,7 @@ async function main(): Promise<void> {
   const reportJsonPath = path.join(distDir, `${LEVEL_NAME}_report.json`);
   const buildReport = {
     levelName: LEVEL_NAME,
+    worldSampleCenterMetres: WORLD_SAMPLE_CENTER,
     profileAnchorElevation,
     formationDepthMetres: PAVEMENT_DEPTH_METRES,
     sumoNetPath,
@@ -498,6 +508,7 @@ async function main(): Promise<void> {
 
   console.log('GATE 4 NATIVE PIPELINE V3 BUILD SUCCESSFUL');
   console.log(`Level: ${LEVEL_NAME}`);
+  console.log(`World sample centre: ${WORLD_SAMPLE_CENTER.toFixed(3)}m`);
   console.log(`Profile anchor elevation: ${profileAnchorElevation.toFixed(3)}m`);
   console.log(`SUMO surface edges: ${sumoRoad.usedEdgeIds.join(' -> ')}`);
   console.log(`SUMO geometry SHA-256: ${sumoRoad.sha256}`);
