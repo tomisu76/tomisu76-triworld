@@ -1,0 +1,11 @@
+{
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=18.345908174257257%2C48.720901760622816%2C18.359333701239922%2C48.73042365069897",
+  "downloadedAtUtc": "2026-07-24T00:08:17.4786939Z",
+  "format": "OSM API v0.6 map.json",
+  "sha256": "b004e894cf8286f1eeac41bbb40025b38400bfe498842d9583ff62c0fc41d25c",
+  "wayId": 109459194,
+  "wayNodeReferenceCount": 33,
+  "missingWayNodeReferences": 0,
+  "nodeCount": 529,
+  "wayCount": 15
+}
