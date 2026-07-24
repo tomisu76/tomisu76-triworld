@@ -20,10 +20,21 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: Run Gate 4 targeted tests
+      - name: Run coupled SUMO-subgrade-DAE regression
+        shell: bash
+        run: |
+          set +e
+          npx vitest run src/beamng-v4/gate4-coupled-road.test.ts --reporter=verbose --no-color > /tmp/gate4-coupled.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "GATE4_COUPLED_FAILURE"
+            grep -E "FAIL|AssertionError|expected|received|gate4-coupled-road|negativeCount|minClearance|maxClearance" /tmp/gate4-coupled.log | tail -n 30 || true
+            exit "$status"
+          fi
+          tail -n 12 /tmp/gate4-coupled.log
+      - name: Run remaining Gate 4 targeted tests
         run: >-
           npx vitest run
           src/beamng-v4/sumo-road-source.test.ts
-          src/beamng-v4/gate4-coupled-road.test.ts
           src/beamng-v4/osm-road-source.test.ts
           src/roads/road-pipeline.test.ts
