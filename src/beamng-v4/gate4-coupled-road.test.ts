@@ -19,6 +19,15 @@ const SIZE = 1024;
 const ROAD_WIDTH_METRES = 8;
 const FORMATION_DEPTH_METRES = 0.30;
 const VERTICES_PER_STATION = 7;
+const CROSS_SECTION_ROLES = [
+  'left-shoulder',
+  'left-road-edge',
+  'left-lane-centre',
+  'crown',
+  'right-lane-centre',
+  'right-road-edge',
+  'right-shoulder',
+] as const;
 
 function createTerrainSampler(elevations: Float32Array): (x: number, y: number) => number {
   return (x: number, y: number): number => {
@@ -108,6 +117,40 @@ function adaptForDae(
       maxAdjacentZJumpMetres,
     },
   };
+}
+
+function inspectSerializedNegativeVertices(
+  dae: string,
+  sampleTerrain: (x: number, y: number) => number,
+  stationValues: readonly number[],
+): Array<Record<string, number | string>> {
+  const match = dae.match(/<float_array id="RoadMesh-positions-array" count="(\d+)">([^<]+)<\/float_array>/);
+  if (!match) throw new Error('Missing serialized DAE positions.');
+  const values = match[2].trim().split(/\s+/).map(Number);
+  const negatives: Array<Record<string, number | string>> = [];
+  for (let vertex = 0; vertex < values.length / 3; vertex++) {
+    const x = values[vertex * 3];
+    const y = values[vertex * 3 + 1];
+    const z = values[vertex * 3 + 2];
+    const terrainZ = sampleTerrain(x, y);
+    const clearance = z - terrainZ;
+    if (clearance < 0) {
+      const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
+      const roleIndex = vertex % VERTICES_PER_STATION;
+      negatives.push({
+        vertex,
+        stationIndex,
+        station: stationValues[stationIndex],
+        role: CROSS_SECTION_ROLES[roleIndex],
+        x,
+        y,
+        z,
+        terrainZ,
+        clearance,
+      });
+    }
+  }
+  return negatives;
 }
 
 describe('Gate 4 coupled SUMO road and terrain', () => {
@@ -203,13 +246,19 @@ describe('Gate 4 coupled SUMO road and terrain', () => {
       new SpatialRoadIndex(SIZE / 2, [designedRoad]),
       elevation,
     );
-    const mesh = adaptForDae(
-      engineered,
-      stations.map((station) => station.station),
-      sampleTerrain,
-    );
+    const stationValues = stations.map((station) => station.station);
+    const mesh = adaptForDae(engineered, stationValues, sampleTerrain);
     const dae = exportRoadMeshToDae(mesh, 'triworld_asphalt');
     const audit = parseDaeVerticesAndAuditClearance(dae, sampleTerrain);
+    const negativeVertices = inspectSerializedNegativeVertices(dae, sampleTerrain, stationValues);
+
+    console.log('GATE4_COUPLED_AUDIT', JSON.stringify({
+      stationCount: stations.length,
+      vertexCount: mesh.vertexCount,
+      triangleCount: mesh.triangleCount,
+      audit,
+      negativeVertices,
+    }));
 
     expect(stations.length).toBeGreaterThan(800);
     expect(mesh.vertexCount).toBe(stations.length * VERTICES_PER_STATION);
