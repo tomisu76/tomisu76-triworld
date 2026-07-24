@@ -13,6 +13,14 @@ function replaceExactly(source: string, oldValue: string, newValue: string, labe
   return source.replace(oldValue, newValue);
 }
 
+function replaceRegexExactly(source: string, pattern: RegExp, replacement: string, label: string): string {
+  const matches = source.match(pattern);
+  if (!matches || matches.length !== 1) {
+    throw new Error(`${label}: expected exactly one regex replacement anchor, found ${matches?.length ?? 0}.`);
+  }
+  return source.replace(pattern, replacement);
+}
+
 function main(): void {
   let transformed = fs.readFileSync(SOURCE, 'utf-8');
 
@@ -30,10 +38,22 @@ function main(): void {
     'elevation source label',
   );
 
-  transformed = replaceExactly(
+  transformed = replaceRegexExactly(
     transformed,
-    `    const z = engineered.mesh.positions[source + 2];\n    positions[source] = x;\n    positions[source + 1] = y;\n    positions[source + 2] = z;`,
-    `    const designedZ = engineered.mesh.positions[source + 2];\n    const terrainZ = sampleTerrainElevation(x, y);\n    // Runtime-safe pavement elevation: lock the serialized DAE to the exact\n    // modified terrain grid that is written into terrain.ter. Semantic\n    // clearances retain a simple crown without allowing datum excursions.\n    const roleClearance = [0.22, 0.22, 0.26, 0.30, 0.26, 0.22, 0.22][crossSectionIndex];\n    const z = terrainZ + roleClearance;\n    if (!Number.isFinite(designedZ) || !Number.isFinite(z)) {\n      throw new Error(\`Non-finite runtime road elevation at station \${stationIndex}, role \${crossSectionIndex}.\`);\n    }\n    positions[source] = x;\n    positions[source + 1] = y;\n    positions[source + 2] = z;`,
+    /    const z = engineered\.mesh\.positions\[source \+ 2\];\r?\n    positions\[source\] = x;\r?\n    positions\[source \+ 1\] = y;\r?\n    positions\[source \+ 2\] = z;/g,
+    `    const designedZ = engineered.mesh.positions[source + 2];
+    const terrainZ = sampleTerrainElevation(x, y);
+    // Runtime-safe pavement elevation: lock the serialized DAE to the exact
+    // modified terrain grid that is written into terrain.ter. Semantic
+    // clearances retain a simple crown without allowing datum excursions.
+    const roleClearance = [0.22, 0.22, 0.26, 0.30, 0.26, 0.22, 0.22][crossSectionIndex];
+    const z = terrainZ + roleClearance;
+    if (!Number.isFinite(designedZ) || !Number.isFinite(z)) {
+      throw new Error(\`Non-finite runtime road elevation at station \${stationIndex}, role \${crossSectionIndex}.\`);
+    }
+    positions[source] = x;
+    positions[source + 1] = y;
+    positions[source + 2] = z;`,
     'runtime DAE elevation',
   );
 
