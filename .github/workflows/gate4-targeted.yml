@@ -59,6 +59,19 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - name: Audit real DEM clearance by station and semantic role
+        shell: bash
+        run: |
+          npx --yes tsx src/beamng-v4/gate4-real-clearance-audit-cli.ts > /tmp/gate4-real-clearance.log 2>&1
+          cat /tmp/gate4-real-clearance.log
+      - name: Upload real clearance audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-real-clearance-log
+          path: /tmp/gate4-real-clearance.log
+          if-no-files-found: error
+          retention-days: 3
       - name: Generate real DEM and orthophoto package
         shell: bash
         run: |
