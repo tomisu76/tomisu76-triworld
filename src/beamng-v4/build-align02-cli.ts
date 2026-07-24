@@ -202,6 +202,7 @@ async function main(): Promise<void> {
     0,
     1.0,
   ]);`, 'candidate A width');
+
   transformed = replaceExactly(transformed, `  const decalNodesB = stations.map((station) => [
     WORLD_RUNTIME_SPAN - (station.x + WORLD_SAMPLE_CENTER),
     station.y + WORLD_SAMPLE_CENTER,
@@ -213,6 +214,7 @@ async function main(): Promise<void> {
     0,
     1.5,
   ]);`, 'candidate B width');
+
   transformed = replaceExactly(transformed, `  const decalNodesD = stations.map((station) => [
     WORLD_RUNTIME_SPAN - (station.x + WORLD_SAMPLE_CENTER),
     WORLD_RUNTIME_SPAN - (station.y + WORLD_SAMPLE_CENTER),
@@ -225,11 +227,13 @@ async function main(): Promise<void> {
     2.5,
   ]);`, 'candidate D width');
 
+  // These replacements are inserted inside ALIGN01's generated template literal.
+  // Use ordinary quoted strings, not nested backticks, to keep the generated TypeScript valid.
   const materialMaps: Array<[string, string]> = [
-    ["Stages: [{ baseColor: [1, 0, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 0, 0, 1], baseColorMap: `/levels/${LEVEL_NAME}/art/road/alignment_red_d.png`, roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
-    ["Stages: [{ baseColor: [0, 0.2, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [0, 0.2, 1, 1], baseColorMap: `/levels/${LEVEL_NAME}/art/road/alignment_blue_d.png`, roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
-    ["Stages: [{ baseColor: [1, 1, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 1, 0, 1], baseColorMap: `/levels/${LEVEL_NAME}/art/road/alignment_yellow_d.png`, roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
-    ["Stages: [{ baseColor: [1, 0, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 0, 1, 1], baseColorMap: `/levels/${LEVEL_NAME}/art/road/alignment_magenta_d.png`, roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
+    ["Stages: [{ baseColor: [1, 0, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 0, 0, 1], baseColorMap: '/levels/align02/art/road/alignment_red_d.png', roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
+    ["Stages: [{ baseColor: [0, 0.2, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [0, 0.2, 1, 1], baseColorMap: '/levels/align02/art/road/alignment_blue_d.png', roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
+    ["Stages: [{ baseColor: [1, 1, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 1, 0, 1], baseColorMap: '/levels/align02/art/road/alignment_yellow_d.png', roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
+    ["Stages: [{ baseColor: [1, 0, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}]", "Stages: [{ baseColor: [1, 0, 1, 1], baseColorMap: '/levels/align02/art/road/alignment_magenta_d.png', roughness: 0.9, metalness: 0 }, {}, {}, {}]"],
   ];
   for (const [oldValue, newValue] of materialMaps) {
     transformed = replaceExactly(transformed, oldValue, newValue, `material texture ${oldValue}`);
