@@ -3,6 +3,7 @@ name: Gate 4 Targeted
 on:
   pull_request:
     paths:
+      - 'BUILD_GATE4_NATIVEV3.cmd'
       - 'src/beamng-v4/**'
       - 'src/pipeline-v3/**'
       - 'src/roads/**'
