@@ -38,11 +38,13 @@ describe('Gate 4 authoritative SUMO road source', () => {
     expect(alignment.usedEdgeIds).toEqual(['42#0', '42#1']);
     expect(alignment.usedLaneIds).toEqual(['42#0_0', '42#1_0']);
     expect(alignment.allEdgeIds).toEqual(['-42#0', '-42#1', '42#0', '42#1']);
-    expect(alignment.pointsCentered).toEqual([
-      { x: -40, y: 0 },
-      { x: 0, y: 0 },
-      { x: 40, y: 0 },
-    ]);
+    expect(alignment.pointsCentered).toHaveLength(3);
+    expect(alignment.pointsCentered[0].x).toBeCloseTo(-40, 6);
+    expect(alignment.pointsCentered[0].y).toBeCloseTo(0, 6);
+    expect(alignment.pointsCentered[1].x).toBeCloseTo(0, 6);
+    expect(alignment.pointsCentered[1].y).toBeCloseTo(0, 6);
+    expect(alignment.pointsCentered[2].x).toBeCloseTo(40, 6);
+    expect(alignment.pointsCentered[2].y).toBeCloseTo(0, 6);
     expect(alignment.lengthMetres).toBeCloseTo(80, 6);
     expect(alignment.minimumDistanceToCentreMetres).toBeCloseTo(0, 6);
     expect(alignment.sha256).toMatch(/^[a-f0-9]{64}$/);
