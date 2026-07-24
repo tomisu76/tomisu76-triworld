@@ -32,6 +32,14 @@ jobs:
             exit "$status"
           fi
           tail -n 12 /tmp/gate4-coupled.log
+      - name: Upload coupled regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-coupled-log
+          path: /tmp/gate4-coupled.log
+          if-no-files-found: error
+          retention-days: 1
       - name: Run remaining Gate 4 targeted tests
         run: >-
           npx vitest run
