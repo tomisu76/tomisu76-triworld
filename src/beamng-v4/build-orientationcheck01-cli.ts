@@ -82,7 +82,7 @@ function createDiagnosticRoad(
     zBias: 0.02,
     decalBias: 0.05,
     breakAngle: 3,
-    nodes,
+    nodes: nodes.map(([x, y, _z, width]) => [x, y, TERRAIN_ELEVATION + 0.2, width] as [number, number, number, number]),
   };
 }
 
