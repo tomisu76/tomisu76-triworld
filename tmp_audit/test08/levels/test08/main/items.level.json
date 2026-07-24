@@ -1,0 +1,6 @@
+{"name":"MissionGroup","class":"SimGroup","persistentId":"0f63c91a-f026-4b20-818f-1ea45fae1892","enabled":"1"}
+{"name":"theLevelInfo","class":"LevelInfo","__parent":"MissionGroup","canvasClearColor":"black","enabled":"1","gravity":-9.81,"visibleDistance":4000}
+{"name":"sunsky","class":"ScatterSky","__parent":"MissionGroup","skyBrightness":40,"sunScale":[1,1,1,1],"ambientScale":[1,1,1,1],"azimuth":290,"elevation":35}
+{"name":"theTerrain","class":"TerrainBlock","__parent":"MissionGroup","terrainFile":"/levels/test08/art/terrains/terrain.ter","position":[0,0,0],"rotationMatrix":[1,0,0,0,1,0,0,0,1],"scale":[1,1,1],"squareSize":1,"maxHeight":500,"baseTexSize":1024,"lightMapSize":256,"screenError":16,"castShadows":true}
+{"name":"spawns_default","class":"SpawnSphere","__parent":"MissionGroup","position":[508.70391226730624,510.68950870197096,418.3732844178459],"rotationMatrix":[-0.18769440258222225,-0.9822274742844972,0,0.9822274742844972,-0.18769440258222225,0,0,0,1],"scale":[1,1,1],"dataBlock":"SpawnSphereMarker"}
+{"name":"road_surface_mesh","class":"TSStatic","__parent":"MissionGroup","shapeName":"/levels/test08/art/road/road_surface.dae","position":[0,0,0],"rotationMatrix":[1,0,0,0,1,0,0,0,1],"scale":[1,1,1],"collisionType":"None","decalType":"None","useInstanceRenderData":false,"meshCulling":false,"isRenderEnabled":true}

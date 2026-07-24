@@ -8,6 +8,7 @@ import type { SumoLaneGeometry, Vec2 } from '../pipeline-v3/sumo/SumoGeometryV3'
 
 export interface RoadCorridorConfig {
   laneWidth?: number;
+  formationDepthMetres?: number;
   roadShapeCentered: readonly Vec2[];
   roadSourceId: string;
 }
@@ -105,6 +106,7 @@ export function applyCoupledRoadTerrainCorridor(
     size,
     squareSize,
     false,
+    config.formationDepthMetres ?? 0,
   );
 
   const sourceRelative = v3Result.grid.getSourceElevationArray();
@@ -185,6 +187,14 @@ function validateInputs(
   }
   if (!Number.isFinite(maxHeight) || maxHeight <= 0) {
     throw new RangeError(`maxHeight must be finite and > 0, received ${maxHeight}.`);
+  }
+  if (
+    config.formationDepthMetres !== undefined &&
+    (!Number.isFinite(config.formationDepthMetres) || config.formationDepthMetres < 0)
+  ) {
+    throw new RangeError(
+      `formationDepthMetres must be finite and >= 0, received ${config.formationDepthMetres}.`,
+    );
   }
   if (!config.roadSourceId.trim()) {
     throw new Error('Gate 3 requires a non-empty roadSourceId.');

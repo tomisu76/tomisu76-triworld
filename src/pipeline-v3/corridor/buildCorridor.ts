@@ -38,15 +38,21 @@ export function buildCorridorV3(
   }
 
   const formationHalfWidth = laneHalfWidth + shoulderWidth;
-  // Extended formation bed width (+1.5m safety grid zone beyond shoulder)
+  // Rasterize a flat formation safety zone beyond the physical shoulder so
+  // bilinear TerrainBlock sampling never blends shoulder vertices with
+  // untouched ground. Daylight slopes begin at this same outer boundary.
   const formationRasterHalfWidth = formationHalfWidth + safetyGridZoneMetres;
 
-  // Determine canonical Side A vs Side B ONCE for the entire lane based on station 0
+  // Determine canonical Side A vs Side B ONCE for the entire lane based on station 0.
+  // The first and final earthwork cross-sections are also extended along the
+  // tangent, so the road endpoint vertices sit inside—not on—the raster boundary.
   const st0 = stations[0];
-  const fLeftX0 = st0.x + st0.normalX * formationHalfWidth;
-  const fLeftY0 = st0.y + st0.normalY * formationHalfWidth;
-  const fRightX0 = st0.x - st0.normalX * formationHalfWidth;
-  const fRightY0 = st0.y - st0.normalY * formationHalfWidth;
+  const st0RasterX = st0.x - st0.tangentX * safetyGridZoneMetres;
+  const st0RasterY = st0.y - st0.tangentY * safetyGridZoneMetres;
+  const fLeftX0 = st0RasterX + st0.normalX * formationRasterHalfWidth;
+  const fLeftY0 = st0RasterY + st0.normalY * formationRasterHalfWidth;
+  const fRightX0 = st0RasterX - st0.normalX * formationRasterHalfWidth;
+  const fRightY0 = st0RasterY - st0.normalY * formationRasterHalfWidth;
 
   const fLeftKey0 = `${Math.round(fLeftX0 * 1000)}:${Math.round(fLeftY0 * 1000)}`;
   const fRightKey0 = `${Math.round(fRightX0 * 1000)}:${Math.round(fRightY0 * 1000)}`;
@@ -60,19 +66,29 @@ export function buildCorridorV3(
   for (let i = 0; i < stations.length; i++) {
     const st = stations[i];
     const stationMm = Math.round(st.station * 1000);
+    const longitudinalPad = i === 0
+      ? -safetyGridZoneMetres
+      : i === stations.length - 1
+        ? safetyGridZoneMetres
+        : 0;
+    const rasterX = st.x + st.tangentX * longitudinalPad;
+    const rasterY = st.y + st.tangentY * longitudinalPad;
+    const rasterStation: DesignedSumoStation = longitudinalPad === 0
+      ? st
+      : { ...st, x: rasterX, y: rasterY };
 
-    const fLeftX = st.x + st.normalX * formationHalfWidth;
-    const fLeftY = st.y + st.normalY * formationHalfWidth;
-    const fRightX = st.x - st.normalX * formationHalfWidth;
-    const fRightY = st.y - st.normalY * formationHalfWidth;
+    const fLeftX = rasterX + st.normalX * formationRasterHalfWidth;
+    const fLeftY = rasterY + st.normalY * formationRasterHalfWidth;
+    const fRightX = rasterX - st.normalX * formationRasterHalfWidth;
+    const fRightY = rasterY - st.normalY * formationRasterHalfWidth;
 
-    // Daylight slope starts at the outer edge of safety grid zone (+1.5m)
-    const daylightLeft = solveDaylightRayV3(st, formationRasterHalfWidth, true, grid, policy);
-    const daylightRight = solveDaylightRayV3(st, formationRasterHalfWidth, false, grid, policy);
+    // Daylight slope starts at the outer edge of the safety grid zone.
+    const daylightLeft = solveDaylightRayV3(rasterStation, formationRasterHalfWidth, true, grid, policy);
+    const daylightRight = solveDaylightRayV3(rasterStation, formationRasterHalfWidth, false, grid, policy);
 
     const isFeasible = daylightLeft.mode !== 'infeasible' && daylightRight.mode !== 'infeasible';
 
-    const centerVertex = createCorridorVertex(st.x, st.y, st.formationZ, `${edgeKey}:${stationMm}:center`, 'center');
+    const centerVertex = createCorridorVertex(rasterX, rasterY, st.formationZ, `${edgeKey}:${stationMm}:center`, 'center');
     const formationLeftVertex = createCorridorVertex(fLeftX, fLeftY, st.formationZ, `${edgeKey}:${stationMm}:formation:${leftSideTag}`, 'formation-left');
     const formationRightVertex = createCorridorVertex(fRightX, fRightY, st.formationZ, `${edgeKey}:${stationMm}:formation:${rightSideTag}`, 'formation-right');
 
@@ -136,28 +152,53 @@ export function buildCorridorV3(
     if (doFixedDiagonalsIntersectInternally(quadFormation.v0, quadFormation.v1, quadFormation.v2, quadFormation.v3)) {
       candidateQuads.push(quadFormation);
     } else {
-      // At sharp bend miter cross, emit two clean fan triangles using center vertex
-      const t0 = createCCWTriangle(
-        `${edgeKey}:seg-${i}:formation-fan0`,
-        quadFormation.quadId,
-        segmentRank,
-        primitiveRankCounter++,
-        'formation',
-        cs0.centerVertex,
-        cs0.formationLeftVertex,
-        cs1.formationLeftVertex,
-      );
-      const t1 = createCCWTriangle(
-        `${edgeKey}:seg-${i}:formation-fan1`,
-        quadFormation.quadId,
-        segmentRank,
-        primitiveRankCounter++,
-        'formation',
-        cs0.centerVertex,
-        cs1.formationRightVertex,
-        cs0.formationRightVertex,
-      );
-      triangles.push(t0, t1);
+      // At a sharp bend the outer formation quad can self-cross. Split it into
+      // complete left and right strips around both station centres. Four fan
+      // triangles are required; using only the two outer triangles leaves an
+      // uncovered centre wedge beneath the road crown.
+      const fanTriangles = [
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-left-0`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs0.formationLeftVertex,
+          cs1.formationLeftVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-left-1`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.formationLeftVertex,
+          cs1.centerVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-right-0`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.centerVertex,
+          cs1.formationRightVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-right-1`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.formationRightVertex,
+          cs0.formationRightVertex,
+        ),
+      ];
+      triangles.push(...fanTriangles);
     }
 
     // 2. Slope Left Quad

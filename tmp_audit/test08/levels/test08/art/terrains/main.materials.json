@@ -1,0 +1,35 @@
+{
+  "ASPHALT": {
+    "class": "TerrainMaterial",
+    "internalName": "ASPHALT",
+    "diffuseMap": "/levels/test08/art/terrains/ground_d.png",
+    "diffuseSize": 1024,
+    "annotation": "ROAD"
+  },
+  "triworld_asphalt": {
+    "name": "triworld_asphalt",
+    "mapTo": "triworld_asphalt",
+    "class": "Material",
+    "internalName": "triworld_asphalt",
+    "persistentId": "7f8b91c2-3e4a-4d56-b789-0123456789ab",
+    "version": 1.5,
+    "Stages": [
+      {
+        "baseColor": [
+          1,
+          0.02,
+          0.02,
+          1
+        ],
+        "baseColorMap": "/levels/test08/art/road/asphalt_d.png",
+        "roughness": 0.8,
+        "metalness": 0
+      },
+      {},
+      {},
+      {}
+    ],
+    "groundmodelName": "ASPHALT",
+    "annotation": "ROAD"
+  }
+}

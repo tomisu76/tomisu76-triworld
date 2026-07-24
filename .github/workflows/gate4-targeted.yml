@@ -1,0 +1,49 @@
+name: Gate 4 Targeted
+
+on:
+  pull_request:
+    paths:
+      - 'BUILD_GATE4_NATIVEV3.cmd'
+      - 'src/beamng-v4/**'
+      - 'src/pipeline-v3/**'
+      - 'src/roads/**'
+      - 'artifacts/gate3-osm/**'
+      - '.github/workflows/gate4-targeted.yml'
+  workflow_dispatch:
+
+jobs:
+  gate4-targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run coupled SUMO-subgrade-DAE regression
+        shell: bash
+        run: |
+          set +e
+          npx vitest run src/beamng-v4/gate4-coupled-road.test.ts --reporter=verbose --no-color > /tmp/gate4-coupled.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "GATE4_COUPLED_FAILURE"
+            grep -E "FAIL|AssertionError|expected|received|gate4-coupled-road|negativeCount|minClearance|maxClearance" /tmp/gate4-coupled.log | tail -n 30 || true
+            exit "$status"
+          fi
+          tail -n 12 /tmp/gate4-coupled.log
+      - name: Upload coupled regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate4-coupled-log
+          path: /tmp/gate4-coupled.log
+          if-no-files-found: error
+          retention-days: 1
+      - name: Run remaining Gate 4 targeted tests
+        run: >-
+          npx vitest run
+          src/beamng-v4/sumo-road-source.test.ts
+          src/beamng-v4/osm-road-source.test.ts
+          src/roads/road-pipeline.test.ts

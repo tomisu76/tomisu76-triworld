@@ -1,0 +1,116 @@
+name: SITECHECK01 Principal SUMO Overlay
+
+on:
+  push:
+    branches:
+      - fix/gate4-native-pipeline-v3
+    paths:
+      - 'src/beamng-v4/build-sitecheck01-sumo-cli.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay-*.ts'
+      - 'src/beamng-v4/sitecheck-terrain.ts'
+      - 'src/beamng-v4/sitecheck-level-package.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay.test.ts'
+      - 'artifacts/sitecheck01-sources/**'
+      - 'config/banovce-accident-site.json'
+      - '.github/workflows/sitecheck01-sumo-overlay.yml'
+  pull_request:
+    paths:
+      - 'src/beamng-v4/build-sitecheck01-sumo-cli.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay-*.ts'
+      - 'src/beamng-v4/sitecheck-terrain.ts'
+      - 'src/beamng-v4/sitecheck-level-package.ts'
+      - 'src/beamng-v4/sitecheck-sumo-overlay.test.ts'
+      - 'artifacts/sitecheck01-sources/**'
+      - 'config/banovce-accident-site.json'
+      - '.github/workflows/sitecheck01-sumo-overlay.yml'
+  workflow_dispatch:
+
+jobs:
+  sitecheck01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Test SUMO principal-centerline resolver
+        run: >-
+          npx vitest run
+          src/beamng-v4/sitecheck-sumo-overlay.test.ts
+          --reporter=verbose
+          --no-color
+
+      - name: Build deterministic SITECHECK01 ZIP
+        shell: bash
+        run: |
+          set +e
+          npx tsx src/beamng-v4/build-sitecheck01-sumo-cli.ts > /tmp/sitecheck01-build.log 2>&1
+          status=$?
+          cat /tmp/sitecheck01-build.log
+          exit $status
+
+      - name: Upload SITECHECK01 build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitecheck01-build-log
+          path: /tmp/sitecheck01-build.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Audit build report
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('dist/sitecheck01_report.json', 'utf8'));
+          const requiredTrue = [
+            'correctSiteCenter',
+            'epsg32634',
+            'committedSourceHashesMatch',
+            'allExpectedRoadsResolved',
+            'sumoPrincipalCenterlines',
+            'noReverseDirectionDuplicates',
+            'noNamedRoadFan',
+            'orthophotoNoTransform',
+            'sourceAndInstalledZipHashesMatch',
+          ];
+          for (const key of requiredTrue) {
+            if (report.verification[key] !== true) {
+              throw new Error(`Expected verification.${key}=true; received ${report.verification[key]}`);
+            }
+          }
+          if (report.verification.terrainDeformationApplied !== false) {
+            throw new Error('SITECHECK01 must not deform terrain.');
+          }
+          if (report.verification.finalRoadMeshIncluded !== false) {
+            throw new Error('SITECHECK01 must not include a final road mesh.');
+          }
+          for (const audit of report.sumo.audits) {
+            if (audit.selectedOverlayCount < 1 || audit.selectedOverlayCount > 2) {
+              throw new Error(`Invalid overlay count for ${audit.name}: ${audit.selectedOverlayCount}`);
+            }
+          }
+          console.log(JSON.stringify({
+            zipHash: report.zipHash,
+            geometrySource: report.sumo.geometrySource,
+            audits: report.sumo.audits,
+          }, null, 2));
+          NODE
+
+      - name: Upload SITECHECK01 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitecheck01-principal-sumo-overlay
+          path: |
+            dist/sitecheck01.zip
+            dist/sitecheck01_report.json
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,49 @@
+{
+  "sumo_centerline_points": 34,
+  "centered_points_sample": [
+    [
+      -5.113126275420655,
+      -89.0882821334526
+    ],
+    [
+      9.286873724602628,
+      -79.2482821336016
+    ],
+    [
+      10.06687372457236,
+      -56.88828213326633
+    ],
+    [
+      3.906873724597972,
+      -31.228282133117318
+    ],
+    [
+      -6.893126275448594,
+      17.781717866659164
+    ],
+    [
+      667.4368737245677,
+      786.8717178665102
+    ],
+    [
+      683.7868737246026,
+      841.3917178669944
+    ],
+    [
+      729.4968737245654,
+      937.1017178669572
+    ],
+    [
+      770.946873724577,
+      1001.9817178668454
+    ],
+    [
+      831.476873724605,
+      1148.9517178665847
+    ]
+  ],
+  "runtime_coords_180_rotation": true,
+  "orthophoto_pixel_rotation": "180 degrees (both X and Y flipped)",
+  "current_implementation_uses": "X+Y flip (mapping D)",
+  "diagnostic_image_path": "C:\\Users\\tomisu\\AppData\\Local\\Temp\\triworld-roadfix02-audit\\alignment_candidates.png"
+}
