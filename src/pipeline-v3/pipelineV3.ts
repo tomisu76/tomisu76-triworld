@@ -40,8 +40,19 @@ export function runPipelineV3ValidationAlpha(
   // 2. Canonicalize SUMO direction
   const sumoResult = canonicalizeSumoDirection(lane);
 
-  // 3. Resample global arc-length stations (1.0m spacing)
-  const planStations = resampleSumoShapeGlobal(sumoResult.canonicalShape, 1.0);
+  // 3. Resample global arc-length stations. Gate 3 retains its historical
+  // sub-metre tangent window. A true Gate 4 subgrade uses a civil transition
+  // at least as wide as the paved half-width plus shoulder, preventing raw
+  // SUMO polyline vertices from rotating a full cross-section in one station.
+  const shoulderWidth = 1.0;
+  const tangentSmoothingHalfWindowMetres = formationDepthMetres > 0
+    ? Math.max(5.0, lane.width / 2 + shoulderWidth)
+    : 0.35;
+  const planStations = resampleSumoShapeGlobal(
+    sumoResult.canonicalShape,
+    1.0,
+    tangentSmoothingHalfWindowMetres,
+  );
 
   // 4. Design authoritative finished-surface vertical profile.
   const designedStations = designVerticalProfileV3(planStations, grid, useSyntheticFormula);
@@ -57,7 +68,6 @@ export function runPipelineV3ValidationAlpha(
 
   // 5. Build corridor quads and triangles at the requested formation elevation.
   const laneHalfWidth = lane.width / 2;
-  const shoulderWidth = 1.0;
   const corridorResult = buildCorridorV3(stations, grid, lane.edgeId, laneHalfWidth, shoulderWidth);
 
   // 6. Execute atomic transaction.
