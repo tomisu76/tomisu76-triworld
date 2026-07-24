@@ -1,0 +1,18 @@
+{
+  "title": "TEST08 — Shared Terrain and DAE Frame",
+  "description": "Native BeamNG level built from real DEM terrain, accepted orthophoto, the authoritative SUMO edge centerline for OSM way 109459194, a 0.30m subgrade, and a seven-point engineered asphalt road surface.",
+  "authors": "TriWorld",
+  "size": [
+    1024,
+    1024
+  ],
+  "defaultSpawnPointName": "spawns_default",
+  "spawnPoints": [
+    {
+      "translationId": "TEST08 — Shared Terrain and DAE Frame Default Spawn",
+      "description": "Centre validation spawn",
+      "objectname": "spawns_default"
+    }
+  ],
+  "supportsTraffic": false
+}

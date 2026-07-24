@@ -1,0 +1,21 @@
+{
+  "terrain_row_range": [
+    600.5882821334526,
+    11.5
+  ],
+  "decalroad_y_range": [
+    600.5882821334526,
+    11.5
+  ],
+  "terrain_col_range": [
+    504.6068737245514,
+    909.7771188545939
+  ],
+  "decalroad_x_range": [
+    518.3931262754486,
+    113.22288114540606
+  ],
+  "y_axis_aligned": true,
+  "x_axis_inverted": true,
+  "conclusion": "X+Y flip appears correct. Check if corridor modification is in correct location."
+}

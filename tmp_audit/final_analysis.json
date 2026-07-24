@@ -1,0 +1,14 @@
+{
+  "hypothesis": "Span value mismatch: 1023.0 vs 1024.0 pixels",
+  "world_runtime_span": 1023.0,
+  "orthophoto_pixels": 1024,
+  "centered_sample": [
+    -5.113126275420655,
+    -89.0882821334526
+  ],
+  "runtime_sample_D": [
+    516.6131262754207,
+    600.5882821334526
+  ],
+  "join_index": 21
+}

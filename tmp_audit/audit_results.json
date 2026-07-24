@@ -1,0 +1,30 @@
+{
+  "repository_state": {
+    "branch": "fix/gate4-native-pipeline-v3",
+    "head": "45ae2d1206acd4c489be327a9fe1e604507050a2"
+  },
+  "sumo_netOffset": {
+    "x": -304540.54,
+    "y": -5399298.81
+  },
+  "orthophoto_wgs84_bbox": {
+    "sw": {
+      "longitude": 18.345908174257257,
+      "latitude": 48.72090176062281
+    },
+    "ne": {
+      "longitude": 18.359333701239922,
+      "latitude": 48.73042365069896
+    }
+  },
+  "transforms": {
+    "world_sample_center": 511.5,
+    "world_runtime_span": 1023.0
+  },
+  "mapping_candidates": {
+    "A_no_flip": "x = station.x + 511.5, y = station.y + 511.5",
+    "B_X_flip": "x = 1023 - (station.x + 511.5), y = station.y + 511.5",
+    "C_Y_flip": "x = station.x + 511.5, y = 1023 - (station.y + 511.5)",
+    "D_X_Y_flip": "x = 1023 - (station.x + 511.5), y = 1023 - (station.y + 511.5)"
+  }
+}
