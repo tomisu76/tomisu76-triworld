@@ -152,28 +152,53 @@ export function buildCorridorV3(
     if (doFixedDiagonalsIntersectInternally(quadFormation.v0, quadFormation.v1, quadFormation.v2, quadFormation.v3)) {
       candidateQuads.push(quadFormation);
     } else {
-      // At sharp bend miter cross, emit two clean fan triangles using center vertex
-      const t0 = createCCWTriangle(
-        `${edgeKey}:seg-${i}:formation-fan0`,
-        quadFormation.quadId,
-        segmentRank,
-        primitiveRankCounter++,
-        'formation',
-        cs0.centerVertex,
-        cs0.formationLeftVertex,
-        cs1.formationLeftVertex,
-      );
-      const t1 = createCCWTriangle(
-        `${edgeKey}:seg-${i}:formation-fan1`,
-        quadFormation.quadId,
-        segmentRank,
-        primitiveRankCounter++,
-        'formation',
-        cs0.centerVertex,
-        cs1.formationRightVertex,
-        cs0.formationRightVertex,
-      );
-      triangles.push(t0, t1);
+      // At a sharp bend the outer formation quad can self-cross. Split it into
+      // complete left and right strips around both station centres. Four fan
+      // triangles are required; using only the two outer triangles leaves an
+      // uncovered centre wedge beneath the road crown.
+      const fanTriangles = [
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-left-0`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs0.formationLeftVertex,
+          cs1.formationLeftVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-left-1`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.formationLeftVertex,
+          cs1.centerVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-right-0`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.centerVertex,
+          cs1.formationRightVertex,
+        ),
+        createCCWTriangle(
+          `${edgeKey}:seg-${i}:formation-fan-right-1`,
+          quadFormation.quadId,
+          segmentRank,
+          primitiveRankCounter++,
+          'formation',
+          cs0.centerVertex,
+          cs1.formationRightVertex,
+          cs0.formationRightVertex,
+        ),
+      ];
+      triangles.push(...fanTriangles);
     }
 
     // 2. Slope Left Quad
