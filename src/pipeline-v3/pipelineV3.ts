@@ -9,6 +9,10 @@ import {
 import { designVerticalProfileV3 } from './civil/designVerticalProfile';
 import { buildCorridorV3, type CorridorResultV3 } from './corridor/buildCorridor';
 import { executeCorridorTransactionV3, type TransactionResultV3 } from './raster/corridorTransaction';
+import {
+  enforceContinuousFormationCoverageV3,
+  type FormationCoverageResultV3,
+} from './raster/formationCoverage';
 import { computePipelineFingerprintsV3, type PipelineFingerprintsV3 } from './diagnostics/fingerprints';
 
 export interface PipelineV3Result {
@@ -17,6 +21,7 @@ export interface PipelineV3Result {
   stations: DesignedSumoStation[];
   corridorResult: CorridorResultV3;
   transactionResult: TransactionResultV3;
+  formationCoverageResult?: FormationCoverageResultV3;
   fingerprints: PipelineFingerprintsV3;
 }
 
@@ -60,14 +65,28 @@ export function runPipelineV3ValidationAlpha(
   const shoulderWidth = 1.0;
   const corridorResult = buildCorridorV3(stations, grid, lane.edgeId, laneHalfWidth, shoulderWidth);
 
-  // 6. Execute atomic transaction
+  // 6. Execute atomic triangle transaction.
   const transactionResult = executeCorridorTransactionV3(corridorResult.triangles, grid);
 
   if (transactionResult.status !== 'success') {
     throw new Error(`Pipeline V3 Transaction Failed: ${transactionResult.error}`);
   }
 
-  // 7. Compute fingerprints
+  // 7. A true Gate 4 subgrade additionally receives a deterministic
+  // nearest-segment capsule pass. This closes sub-cell and sharp-bend holes
+  // under road edges without changing the designed road surface. Gate 3's
+  // historical zero-depth behaviour remains byte-for-byte untouched.
+  const formationCoverageResult = formationDepthMetres > 0
+    ? enforceContinuousFormationCoverageV3(
+        stations,
+        grid,
+        transactionResult,
+        laneHalfWidth,
+        shoulderWidth,
+      )
+    : undefined;
+
+  // 8. Compute fingerprints after every terrain and buffer mutation.
   const fingerprints = computePipelineFingerprintsV3(grid, sumoResult, corridorResult, transactionResult);
 
   return {
@@ -76,6 +95,7 @@ export function runPipelineV3ValidationAlpha(
     stations,
     corridorResult,
     transactionResult,
+    formationCoverageResult,
     fingerprints,
   };
 }
