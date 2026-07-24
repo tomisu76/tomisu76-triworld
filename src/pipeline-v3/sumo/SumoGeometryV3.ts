@@ -93,7 +93,7 @@ export function resampleSumoShapeGlobal(
 
   if (clean.length < 2) return [];
 
-  // Compute cumulative 2D distance
+  // Compute cumulative 2D distance on the authoritative source polyline.
   const cumDist: number[] = [0];
   for (let i = 1; i < clean.length; i++) {
     const d = Math.hypot(clean[i].x - clean[i - 1].x, clean[i].y - clean[i - 1].y);
@@ -103,7 +103,9 @@ export function resampleSumoShapeGlobal(
   const totalLength = cumDist[cumDist.length - 1];
   if (totalLength < 1e-4) return [];
 
-  // Adaptive stationing: 0.5m density on sharp curves, 1.0m on straights
+  // Adaptive stationing: 0.5m density on sharp curves, 1.0m on straights.
+  // Station values remain measured on the authoritative SUMO chain so existing
+  // provenance, UV stationing and deterministic counts stay stable.
   const rawStationsS: number[] = [0];
   let currentS = 0;
 
@@ -142,23 +144,50 @@ export function resampleSumoShapeGlobal(
 
   for (const sTarget of rawStationsS) {
     const clampedS = Math.min(totalLength, Math.max(0, sTarget));
-    const pt = samplePolylinePoint(clean, cumDist, clampedS);
 
-    // Compute a civil-style smoothed tangent using a configurable continuous
-    // arc-length window. Gate 3 retains the historical 0.35m window. Gate 4
-    // uses a wider window so a polyline source vertex cannot rotate the full
-    // road cross-section within a single one-metre station.
-    const deltaS = tangentSmoothingHalfWindowMetres;
-    const sBack = Math.max(0, clampedS - deltaS);
-    const sFwd = Math.min(totalLength, clampedS + deltaS);
+    // Gate 4 previously smoothed only the tangent while leaving each station on
+    // the sharp source polyline. A wide cross-section centred on those sharp
+    // points but oriented by a different, smoothed tangent creates folded and
+    // excessively wide strips. Use one continuous smoothed plan curve for both
+    // station positions and their frame. Gate 3's 0.35m window is effectively
+    // source-faithful; Gate 4's civil window rounds raw SUMO vertices locally.
+    const pt = sampleSmoothedPolylinePoint(
+      clean,
+      cumDist,
+      clampedS,
+      tangentSmoothingHalfWindowMetres,
+    );
 
-    const ptBack = samplePolylinePoint(clean, cumDist, sBack);
-    const ptFwd = samplePolylinePoint(clean, cumDist, sFwd);
+    const derivativeWindow = Math.max(
+      0.25,
+      Math.min(tangentSmoothingHalfWindowMetres / 2, 2.0),
+    );
+    const sBack = Math.max(0, clampedS - derivativeWindow);
+    const sFwd = Math.min(totalLength, clampedS + derivativeWindow);
+    const ptBack = sampleSmoothedPolylinePoint(
+      clean,
+      cumDist,
+      sBack,
+      tangentSmoothingHalfWindowMetres,
+    );
+    const ptFwd = sampleSmoothedPolylinePoint(
+      clean,
+      cumDist,
+      sFwd,
+      tangentSmoothingHalfWindowMetres,
+    );
 
     let dx = ptFwd.x - ptBack.x;
     let dy = ptFwd.y - ptBack.y;
     let len = Math.hypot(dx, dy);
 
+    if (len < 1e-6) {
+      const rawBack = samplePolylinePoint(clean, cumDist, sBack);
+      const rawFwd = samplePolylinePoint(clean, cumDist, sFwd);
+      dx = rawFwd.x - rawBack.x;
+      dy = rawFwd.y - rawBack.y;
+      len = Math.hypot(dx, dy);
+    }
     if (len < 1e-6) {
       dx = 1;
       dy = 0;
@@ -182,6 +211,47 @@ export function resampleSumoShapeGlobal(
   }
 
   return stations;
+}
+
+/**
+ * Symmetric five-sample binomial filter evaluated in arc-length space.
+ * Endpoints are kept exactly on the authoritative SUMO chain, while interior
+ * source corners receive a bounded, deterministic civil-style transition.
+ */
+function sampleSmoothedPolylinePoint(
+  clean: Vec2[],
+  cumDist: number[],
+  s: number,
+  halfWindowMetres: number,
+): Vec2 {
+  const totalLength = cumDist[cumDist.length - 1];
+  const targetS = Math.min(totalLength, Math.max(0, s));
+  if (targetS <= 1e-9 || targetS >= totalLength - 1e-9 || halfWindowMetres <= 0.5) {
+    return samplePolylinePoint(clean, cumDist, targetS);
+  }
+
+  const offsets = [-1, -0.5, 0, 0.5, 1];
+  const weights = [1, 4, 6, 4, 1];
+  let weightedX = 0;
+  let weightedY = 0;
+  let totalWeight = 0;
+
+  for (let index = 0; index < offsets.length; index++) {
+    const sampleS = Math.min(
+      totalLength,
+      Math.max(0, targetS + offsets[index] * halfWindowMetres),
+    );
+    const point = samplePolylinePoint(clean, cumDist, sampleS);
+    const weight = weights[index];
+    weightedX += point.x * weight;
+    weightedY += point.y * weight;
+    totalWeight += weight;
+  }
+
+  return {
+    x: weightedX / totalWeight,
+    y: weightedY / totalWeight,
+  };
 }
 
 function samplePolylinePoint(clean: Vec2[], cumDist: number[], s: number): Vec2 {
