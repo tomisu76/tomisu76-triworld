@@ -205,7 +205,6 @@ function parseSumoNetXmlLanes(netXmlPath: string): SumoLaneShape[] {
 async function main(): Promise<void> {
   console.log(`Building TriWorld V4 Gate 4 Native Pipeline V3 Level: ${LEVEL_NAME}...`);
 
-  // 1. Load the authoritative SUMO network for provenance and later AI routing.
   const sumoNetPath = path.resolve('artifacts/gate3-osm/banovce_authoritative.net.xml');
   const targetSumoLanes = parseSumoNetXmlLanes(sumoNetPath)
     .filter((lane) => AUTHORITATIVE_SUMO_EDGE_IDS.has(lane.edgeId));
@@ -223,7 +222,6 @@ async function main(): Promise<void> {
     `Authoritative SUMO network loaded: ${usedEdgeIds.join(', ')}; lanes ${usedLaneIds.join(', ')}.`,
   );
 
-  // 2. Build real-world DEM terrain.
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
     squareSize: SQUARE_SIZE,
@@ -236,9 +234,6 @@ async function main(): Promise<void> {
     throw new Error('Gate 4 rejected: DEM download failed and analytic fallback was used.');
   }
 
-  // 3. Resolve the same authoritative OSM way in the accepted Gate 3 map frame.
-  // SUMO carries the matching AI topology; a later isolated bridge will replace
-  // this horizontal source only after its UTM/netOffset transform is audited.
   const road = await fetchPrimaryOsmRoadAlignment(sourceTerrain.transformer, {
     minimumLengthMetres: 80,
     minimumInsetMetres: 12,
@@ -253,7 +248,6 @@ async function main(): Promise<void> {
     `${road.name ?? road.highway}, ${road.pointCount} points, ${road.lengthMetres.toFixed(1)}m`,
   );
 
-  // 4. Run Pipeline V3 with a true 0.30m subgrade below the designed surface.
   const corridor = applyCoupledRoadTerrainCorridor(
     sourceTerrain.rawElevations,
     SIZE,
@@ -267,6 +261,7 @@ async function main(): Promise<void> {
     },
   );
 
+  const profileAnchorElevation = corridor.v3Result.grid.anchorElevation;
   const heightScale = MAX_HEIGHT / 65535.0;
   const decodedRange = scanDecodedRange(corridor.heightMapU16, heightScale);
   const artifact = {
@@ -284,7 +279,6 @@ async function main(): Promise<void> {
   );
   const baseMarkers = generateDiagnosticMarkers(sourceTerrain.transformer, sampleTerrainElevation);
 
-  // 5. Export the authoritative seven-point designed road surface.
   const stations = corridor.v3Result.stations;
   const designPolicy = getRoadDesignPolicy(road.highway);
   const halfWidth = road.laneWidthMetres / 2;
@@ -310,8 +304,8 @@ async function main(): Promise<void> {
         station: station.station,
         x: station.x,
         y: station.y,
-        groundZ: station.groundZ,
-        designZ: station.surfaceZ,
+        groundZ: station.groundZ + profileAnchorElevation,
+        designZ: station.surfaceZ + profileAnchorElevation,
         grade: ds > 0 ? (next.surfaceZ - previous.surfaceZ) / ds : 0,
         tangentX: station.tangentX,
         tangentY: station.tangentY,
@@ -347,7 +341,6 @@ async function main(): Promise<void> {
   const roadDae = exportRoadMeshToDae(roadMesh, 'triworld_asphalt');
   const asphaltPng = generateAsphaltTexturePng(256);
 
-  // 6. Audit the exact exported DAE against the final subgrade terrain.
   const daeAudit = parseDaeVerticesAndAuditClearance(roadDae, sampleTerrainElevation);
   const crossfallDrop = Math.abs((road.laneWidthMetres / 2) * designPolicy.crossfall);
   const minimumAllowedClearance = PAVEMENT_DEPTH_METRES - crossfallDrop - 0.05;
@@ -381,7 +374,7 @@ async function main(): Promise<void> {
       name: `station_marker_${Math.round(st.station)}m`,
       class: 'TSStatic',
       shapeName: 'core/art/shapes/octahedron.dae',
-      position: [st.x + halfGrid, st.y + halfGrid, st.surfaceZ + 0.5],
+      position: [st.x + halfGrid, st.y + halfGrid, st.surfaceZ + profileAnchorElevation + 0.5],
       rotationMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
       scale: [0.5, 0.5, 0.5],
     });
@@ -439,6 +432,7 @@ async function main(): Promise<void> {
   const reportJsonPath = path.join(distDir, `${LEVEL_NAME}_report.json`);
   const buildReport = {
     levelName: LEVEL_NAME,
+    profileAnchorElevation,
     formationDepthMetres: PAVEMENT_DEPTH_METRES,
     sumoNetPath,
     sumoEdges: usedEdgeIds,
@@ -486,6 +480,7 @@ async function main(): Promise<void> {
 
   console.log('GATE 4 NATIVE PIPELINE V3 BUILD SUCCESSFUL');
   console.log(`Level: ${LEVEL_NAME}`);
+  console.log(`Profile anchor elevation: ${profileAnchorElevation.toFixed(3)}m`);
   console.log(`SUMO Edges: ${usedEdgeIds.join(', ')}`);
   console.log(`SUMO Lanes: ${usedLaneIds.join(', ')}`);
   console.log(`Road Mesh: ${roadMesh.vertexCount} vertices, ${roadMesh.triangleCount} triangles, ${roadMesh.lengthMetres.toFixed(1)}m length`);
