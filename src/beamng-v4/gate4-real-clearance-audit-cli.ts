@@ -68,39 +68,49 @@ function auditFrame(
   let minimum = Number.POSITIVE_INFINITY;
   let maximum = Number.NEGATIVE_INFINITY;
   let total = 0;
+  let minimumVertex: Record<string, number | string> | undefined;
+  let maximumVertex: Record<string, number | string> | undefined;
   const vertexCount = positions.length / 3;
 
   for (let vertex = 0; vertex < vertexCount; vertex++) {
     const source = vertex * 3;
+    const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
+    const roleIndex = vertex % VERTICES_PER_STATION;
+    const role = ROLES[roleIndex];
+    const station = stations[stationIndex];
     const x = Number((positions[source] + worldOffset).toFixed(4));
     const y = Number((positions[source + 1] + worldOffset).toFixed(4));
     const z = Number(positions[source + 2].toFixed(4));
     const terrainZ = sampleTerrain(x, y);
     const clearance = z - terrainZ;
-    minimum = Math.min(minimum, clearance);
-    maximum = Math.max(maximum, clearance);
+    const record = {
+      frame: label,
+      vertex,
+      stationIndex,
+      station: station.station,
+      role,
+      x,
+      y,
+      z,
+      terrainZ,
+      clearance,
+      surfaceZAbsolute: station.surfaceZ + profileAnchorElevation,
+      formationZAbsolute: station.formationZ + profileAnchorElevation,
+    };
+
+    if (clearance < minimum) {
+      minimum = clearance;
+      minimumVertex = record;
+    }
+    if (clearance > maximum) {
+      maximum = clearance;
+      maximumVertex = record;
+    }
     total += clearance;
 
     if (clearance < 0) {
-      const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
-      const roleIndex = vertex % VERTICES_PER_STATION;
-      const role = ROLES[roleIndex];
       roleCounts[role] += 1;
-      const station = stations[stationIndex];
-      negatives.push({
-        frame: label,
-        vertex,
-        stationIndex,
-        station: station.station,
-        role,
-        x,
-        y,
-        z,
-        terrainZ,
-        clearance,
-        surfaceZAbsolute: station.surfaceZ + profileAnchorElevation,
-        formationZAbsolute: station.formationZ + profileAnchorElevation,
-      });
+      negatives.push(record);
     }
   }
 
@@ -113,6 +123,8 @@ function auditFrame(
     meanClearance: total / vertexCount,
     negativeCount: negatives.length,
     roleCounts,
+    minimumVertex,
+    maximumVertex,
   }));
   for (const negative of negatives.slice(0, 60)) {
     console.log('GATE4_REAL_FRAME_NEGATIVE', JSON.stringify(negative));
