@@ -55,6 +55,70 @@ function createTerrainSampler(
   };
 }
 
+function auditFrame(
+  label: string,
+  worldOffset: number,
+  positions: readonly number[],
+  stations: readonly { station: number; surfaceZ: number; formationZ: number }[],
+  profileAnchorElevation: number,
+  sampleTerrain: (x: number, y: number) => number,
+): void {
+  const negatives: Array<Record<string, number | string>> = [];
+  const roleCounts = Object.fromEntries(ROLES.map((role) => [role, 0])) as Record<string, number>;
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  let total = 0;
+  const vertexCount = positions.length / 3;
+
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    const source = vertex * 3;
+    const x = Number((positions[source] + worldOffset).toFixed(4));
+    const y = Number((positions[source + 1] + worldOffset).toFixed(4));
+    const z = Number(positions[source + 2].toFixed(4));
+    const terrainZ = sampleTerrain(x, y);
+    const clearance = z - terrainZ;
+    minimum = Math.min(minimum, clearance);
+    maximum = Math.max(maximum, clearance);
+    total += clearance;
+
+    if (clearance < 0) {
+      const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
+      const roleIndex = vertex % VERTICES_PER_STATION;
+      const role = ROLES[roleIndex];
+      roleCounts[role] += 1;
+      const station = stations[stationIndex];
+      negatives.push({
+        frame: label,
+        vertex,
+        stationIndex,
+        station: station.station,
+        role,
+        x,
+        y,
+        z,
+        terrainZ,
+        clearance,
+        surfaceZAbsolute: station.surfaceZ + profileAnchorElevation,
+        formationZAbsolute: station.formationZ + profileAnchorElevation,
+      });
+    }
+  }
+
+  console.log('GATE4_REAL_FRAME_SUMMARY', JSON.stringify({
+    frame: label,
+    worldOffset,
+    vertexCount,
+    minimumClearance: minimum,
+    maximumClearance: maximum,
+    meanClearance: total / vertexCount,
+    negativeCount: negatives.length,
+    roleCounts,
+  }));
+  for (const negative of negatives.slice(0, 60)) {
+    console.log('GATE4_REAL_FRAME_NEGATIVE', JSON.stringify(negative));
+  }
+}
+
 async function main(): Promise<void> {
   const sourceTerrain = await buildBanovceRealWorldTerrainAsync({
     size: SIZE,
@@ -142,7 +206,7 @@ async function main(): Promise<void> {
     verticalCurves: [],
   };
   const elevation: ElevationModel = {
-    source: 'Gate 4 real DEM clearance audit',
+    source: 'Gate 4 real DEM frame audit',
     zoom: 0,
     anchorElevationMetres: 0,
     sampleAbsoluteLocal: (x, y) => sampleTerrain(x + SIZE / 2, y + SIZE / 2),
@@ -154,64 +218,31 @@ async function main(): Promise<void> {
     elevation,
   );
 
-  const negatives: Array<Record<string, number | string>> = [];
-  const roleCounts = Object.fromEntries(ROLES.map((role) => [role, 0])) as Record<string, number>;
-  let minimum = Number.POSITIVE_INFINITY;
-  let maximum = Number.NEGATIVE_INFINITY;
-  let total = 0;
-  const vertexCount = engineered.mesh.positions.length / 3;
-
-  for (let vertex = 0; vertex < vertexCount; vertex++) {
-    const source = vertex * 3;
-    // Match Collada serialization precision exactly.
-    const x = Number((engineered.mesh.positions[source] + SIZE / 2).toFixed(4));
-    const y = Number((engineered.mesh.positions[source + 1] + SIZE / 2).toFixed(4));
-    const z = Number(engineered.mesh.positions[source + 2].toFixed(4));
-    const terrainZ = sampleTerrain(x, y);
-    const clearance = z - terrainZ;
-    minimum = Math.min(minimum, clearance);
-    maximum = Math.max(maximum, clearance);
-    total += clearance;
-
-    if (clearance < 0) {
-      const stationIndex = Math.floor(vertex / VERTICES_PER_STATION);
-      const roleIndex = vertex % VERTICES_PER_STATION;
-      const role = ROLES[roleIndex];
-      roleCounts[role] += 1;
-      const station = stations[stationIndex];
-      negatives.push({
-        vertex,
-        stationIndex,
-        station: station.station,
-        role,
-        x,
-        y,
-        z,
-        terrainZ,
-        clearance,
-        surfaceZAbsolute: station.surfaceZ + profileAnchorElevation,
-        formationZAbsolute: station.formationZ + profileAnchorElevation,
-      });
-    }
-  }
-
-  const summary = {
+  console.log('GATE4_REAL_GEOMETRY', JSON.stringify({
     stationCount: stations.length,
-    vertexCount,
+    vertexCount: engineered.mesh.positions.length / 3,
     triangleCount: engineered.mesh.indices.length / 3,
-    minimumClearance: minimum,
-    maximumClearance: maximum,
-    meanClearance: total / vertexCount,
-    negativeCount: negatives.length,
-    roleCounts,
     corridorStats: corridor.stats,
     sumoEdges: sumoRoad.usedEdgeIds,
     sumoGeometryHash: sumoRoad.sha256,
-  };
-  console.log('GATE4_REAL_CLEARANCE_SUMMARY', JSON.stringify(summary));
-  for (const negative of negatives) {
-    console.log('GATE4_REAL_NEGATIVE_VERTEX', JSON.stringify(negative));
-  }
+  }));
+
+  auditFrame(
+    'transformer-half-extent-512.0',
+    SIZE / 2,
+    engineered.mesh.positions,
+    stations,
+    profileAnchorElevation,
+    sampleTerrain,
+  );
+  auditFrame(
+    'terrain-sample-centre-511.5',
+    (SIZE - 1) / 2,
+    engineered.mesh.positions,
+    stations,
+    profileAnchorElevation,
+    sampleTerrain,
+  );
 }
 
 main().catch((error: unknown) => {
