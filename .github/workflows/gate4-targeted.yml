@@ -24,5 +24,6 @@ jobs:
         run: >-
           npx vitest run
           src/beamng-v4/sumo-road-source.test.ts
+          src/beamng-v4/gate4-coupled-road.test.ts
           src/beamng-v4/osm-road-source.test.ts
           src/roads/road-pipeline.test.ts
