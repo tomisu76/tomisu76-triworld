@@ -48,7 +48,22 @@ jobs:
           --no-color
 
       - name: Build deterministic SITECHECK01 ZIP
-        run: npx tsx src/beamng-v4/build-sitecheck01-sumo-cli.ts
+        shell: bash
+        run: |
+          set +e
+          npx tsx src/beamng-v4/build-sitecheck01-sumo-cli.ts > /tmp/sitecheck01-build.log 2>&1
+          status=$?
+          cat /tmp/sitecheck01-build.log
+          exit $status
+
+      - name: Upload SITECHECK01 build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitecheck01-build-log
+          path: /tmp/sitecheck01-build.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Audit build report
         shell: bash
