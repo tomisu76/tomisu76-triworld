@@ -55,58 +55,97 @@ function createDiagnosticTexture(r: number, g: number, b: number): Uint8Array {
   return generateSolidPng(64, 64, r, g, b);
 }
 
-// Create DecalRoad cross marker
-function createCrossDecalRoad(name: string, x: number, y: number, material: string, renderPriority: number): LevelMarker {
-  const crossSize = 8; // 8m wide cross
+// Create a two-node diagnostic DecalRoad
+function createDiagnosticRoad(
+  name: string,
+  material: string,
+  renderPriority: number,
+  nodes: [number, number, number, number][],
+): LevelMarker {
+  if (nodes.length !== 2) {
+    throw new Error(`${name} must contain exactly two DecalRoad nodes.`);
+  }
+
   return {
     name,
     class: 'DecalRoad',
     __parent: 'MissionGroup',
     material,
-    textureLength: 1,
+    textureLength: 16,
     renderPriority,
-    drivability: 0,
+    drivability: -1,
     autoLanes: false,
     autoJunction: false,
     oneWay: false,
     flipDirection: false,
-    overObjects: false,
-    zBias: 0.001,
-    decalBias: 0.01,
+    overObjects: true,
+    zBias: 0.02,
+    decalBias: 0.05,
     breakAngle: 3,
-    nodes: [
-      // Horizontal bar
-      [x - crossSize, y, TERRAIN_ELEVATION + 0.1, 1],
-      [x + crossSize, y, TERRAIN_ELEVATION + 0.1, 1],
-      // Vertical bar
-      [x, y - crossSize, TERRAIN_ELEVATION + 0.1, 1],
-      [x, y + crossSize, TERRAIN_ELEVATION + 0.1, 1],
-    ],
+    nodes,
   };
 }
 
-// Create DecalRoad arrow
-function createArrowDecalRoad(name: string, fromX: number, fromY: number, toX: number, toY: number, material: string, renderPriority: number): LevelMarker {
+function createCrossRoads(
+  prefix: string,
+  x: number,
+  y: number,
+  material: string,
+  firstRenderPriority: number,
+): LevelMarker[] {
+  const halfLength = 30;
+  const width = 12;
+
+  return [
+    createDiagnosticRoad(
+      `${prefix}_horizontal`,
+      material,
+      firstRenderPriority,
+      [
+        [x - halfLength, y, 0, width],
+        [x + halfLength, y, 0, width],
+      ],
+    ),
+    createDiagnosticRoad(
+      `${prefix}_vertical`,
+      material,
+      firstRenderPriority + 1,
+      [
+        [x, y - halfLength, 0, width],
+        [x, y + halfLength, 0, width],
+      ],
+    ),
+  ];
+}
+
+function createDiagnosticMaterial(
+  name: string,
+  persistentId: string,
+  baseColor: [number, number, number, number],
+  textureFile: string,
+): Record<string, unknown> {
   return {
     name,
-    class: 'DecalRoad',
-    __parent: 'MissionGroup',
-    material,
-    textureLength: 1,
-    renderPriority,
-    drivability: 0,
-    autoLanes: false,
-    autoJunction: false,
-    oneWay: false,
-    flipDirection: false,
-    overObjects: false,
-    zBias: 0.001,
-    decalBias: 0.01,
-    breakAngle: 3,
-    nodes: [
-      [fromX, fromY, TERRAIN_ELEVATION + 0.1, 1],
-      [toX, toY, TERRAIN_ELEVATION + 0.1, 1],
+    mapTo: name,
+    class: 'Material',
+    internalName: name,
+    persistentId,
+    version: 1.5,
+    Stages: [
+      {
+        baseColor,
+        baseColorMap: `/levels/${LEVEL_NAME}/art/road/${textureFile}`,
+        roughness: 0.9,
+        metalness: 0,
+      },
+      {},
+      {},
+      {},
     ],
+    translucent: true,
+    translucentZWrite: true,
+    groundmodelName: 'ASPHALT',
+    annotation: 'ROAD',
   };
 }
 
@@ -140,19 +179,69 @@ async function main(): Promise<void> {
   
   // Create DecalRoad diagnostic markers
   const decalRoads: LevelMarker[] = [
-    // Corner crosses
-    createCrossDecalRoad('cross_sw', 16, 16, 'orientationcheck01_red', 10),
-    createCrossDecalRoad('cross_se', 1007, 16, 'orientationcheck01_green', 11),
-    createCrossDecalRoad('cross_nw', 16, 1007, 'orientationcheck01_blue', 12),
-    createCrossDecalRoad('cross_ne', 1007, 1007, 'orientationcheck01_yellow', 13),
-    // Centre cross
-    createCrossDecalRoad('cross_center', WORLD_CENTER, WORLD_CENTER, 'orientationcheck01_white', 14),
-    // World +X arrow (cyan)
-    createArrowDecalRoad('arrow_east', WORLD_CENTER, WORLD_CENTER, 767.5, WORLD_CENTER, 'orientationcheck01_cyan', 15),
-    // World +Y arrow (magenta)
-    createArrowDecalRoad('arrow_north', WORLD_CENTER, WORLD_CENTER, WORLD_CENTER, 767.5, 'orientationcheck01_magenta', 16),
+    ...createCrossRoads('cross_sw', 64, 64, 'orientationcheck01_red', 10),
+    ...createCrossRoads('cross_se', 959, 64, 'orientationcheck01_green', 12),
+    ...createCrossRoads('cross_nw', 64, 959, 'orientationcheck01_blue', 14),
+    ...createCrossRoads('cross_ne', 959, 959, 'orientationcheck01_yellow', 16),
+    ...createCrossRoads('cross_center', WORLD_CENTER, WORLD_CENTER, 'orientationcheck01_white', 18),
+
+    createDiagnosticRoad(
+      'axis_east_shaft',
+      'orientationcheck01_cyan',
+      20,
+      [
+        [WORLD_CENTER, WORLD_CENTER, 0, 18],
+        [900, WORLD_CENTER, 0, 18],
+      ],
+    ),
+    createDiagnosticRoad(
+      'axis_east_head_upper',
+      'orientationcheck01_cyan',
+      21,
+      [
+        [900, WORLD_CENTER, 0, 18],
+        [860, 541.5, 0, 18],
+      ],
+    ),
+    createDiagnosticRoad(
+      'axis_east_head_lower',
+      'orientationcheck01_cyan',
+      22,
+      [
+        [900, WORLD_CENTER, 0, 18],
+        [860, 481.5, 0, 18],
+      ],
+    ),
+
+    createDiagnosticRoad(
+      'axis_north_shaft',
+      'orientationcheck01_magenta',
+      23,
+      [
+        [WORLD_CENTER, WORLD_CENTER, 0, 18],
+        [WORLD_CENTER, 900, 0, 18],
+      ],
+    ),
+    createDiagnosticRoad(
+      'axis_north_head_left',
+      'orientationcheck01_magenta',
+      24,
+      [
+        [WORLD_CENTER, 900, 0, 18],
+        [481.5, 860, 0, 18],
+      ],
+    ),
+    createDiagnosticRoad(
+      'axis_north_head_right',
+      'orientationcheck01_magenta',
+      25,
+      [
+        [WORLD_CENTER, 900, 0, 18],
+        [541.5, 860, 0, 18],
+      ],
+    ),
   ];
-  
+
   // Create spawn point
   const spawnPoint: LevelMarker = {
     name: 'spawns_default',
@@ -279,76 +368,48 @@ async function main(): Promise<void> {
       groundmodelName: 'GRASS',
       annotation: 'NATURE',
     },
-    orientationcheck01_red: {
-      class: 'Material',
-      internalName: 'orientationcheck01_red',
-      persistentId: '11111111-1111-1111-1111-111111111111',
-      version: 1.5,
-      Stages: [{ baseColor: [1, 0, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_green: {
-      class: 'Material',
-      internalName: 'orientationcheck01_green',
-      persistentId: '22222222-2222-2222-2222-222222222222',
-      version: 1.5,
-      Stages: [{ baseColor: [0, 1, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_blue: {
-      class: 'Material',
-      internalName: 'orientationcheck01_blue',
-      persistentId: '33333333-3333-3333-3333-333333333333',
-      version: 1.5,
-      Stages: [{ baseColor: [0, 0, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_yellow: {
-      class: 'Material',
-      internalName: 'orientationcheck01_yellow',
-      persistentId: '44444444-4444-4444-4444-444444444444',
-      version: 1.5,
-      Stages: [{ baseColor: [1, 1, 0, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_white: {
-      class: 'Material',
-      internalName: 'orientationcheck01_white',
-      persistentId: '55555555-5555-5555-5555-555555555555',
-      version: 1.5,
-      Stages: [{ baseColor: [1, 1, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_cyan: {
-      class: 'Material',
-      internalName: 'orientationcheck01_cyan',
-      persistentId: '66666666-6666-6666-6666-666666666666',
-      version: 1.5,
-      Stages: [{ baseColor: [0, 1, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
-    orientationcheck01_magenta: {
-      class: 'Material',
-      internalName: 'orientationcheck01_magenta',
-      persistentId: '77777777-7777-7777-7777-777777777777',
-      version: 1.5,
-      Stages: [{ baseColor: [1, 0, 1, 1], roughness: 0.9, metalness: 0 }, {}, {}, {}],
-      translucent: false,
-      groundmodelName: 'ASPHALT',
-      annotation: 'ROAD',
-    },
+    orientationcheck01_red: createDiagnosticMaterial(
+      'orientationcheck01_red',
+      '11111111-1111-1111-1111-111111111111',
+      [1, 0, 0, 1],
+      'alignment_red_d.png',
+    ),
+    orientationcheck01_green: createDiagnosticMaterial(
+      'orientationcheck01_green',
+      '22222222-2222-2222-2222-222222222222',
+      [0, 1, 0, 1],
+      'alignment_green_d.png',
+    ),
+    orientationcheck01_blue: createDiagnosticMaterial(
+      'orientationcheck01_blue',
+      '33333333-3333-3333-3333-333333333333',
+      [0, 0, 1, 1],
+      'alignment_blue_d.png',
+    ),
+    orientationcheck01_yellow: createDiagnosticMaterial(
+      'orientationcheck01_yellow',
+      '44444444-4444-4444-4444-444444444444',
+      [1, 1, 0, 1],
+      'alignment_yellow_d.png',
+    ),
+    orientationcheck01_white: createDiagnosticMaterial(
+      'orientationcheck01_white',
+      '55555555-5555-5555-5555-555555555555',
+      [1, 1, 1, 1],
+      'alignment_white_d.png',
+    ),
+    orientationcheck01_cyan: createDiagnosticMaterial(
+      'orientationcheck01_cyan',
+      '66666666-6666-6666-6666-666666666666',
+      [0, 1, 1, 1],
+      'alignment_cyan_d.png',
+    ),
+    orientationcheck01_magenta: createDiagnosticMaterial(
+      'orientationcheck01_magenta',
+      '77777777-7777-7777-7777-777777777777',
+      [1, 0, 1, 1],
+      'alignment_magenta_d.png',
+    ),
   };
   
   // Build ZIP
@@ -433,19 +494,19 @@ async function main(): Promise<void> {
     },
     textureTransformFormula: 'pixel(x, y) = original(x, y) (no transformation)',
     worldMarkerPositions: {
-      SW: { position: [16, 16, TERRAIN_ELEVATION + 0.1], color: 'red', type: 'DecalRoad cross' },
-      SE: { position: [1007, 16, TERRAIN_ELEVATION + 0.1], color: 'green', type: 'DecalRoad cross' },
-      NW: { position: [16, 1007, TERRAIN_ELEVATION + 0.1], color: 'blue', type: 'DecalRoad cross' },
-      NE: { position: [1007, 1007, TERRAIN_ELEVATION + 0.1], color: 'yellow', type: 'DecalRoad cross' },
-      centre: { position: [511.5, 511.5, TERRAIN_ELEVATION + 0.1], color: 'white', type: 'DecalRoad cross' },
-      east: { position: [767.5, 511.5, TERRAIN_ELEVATION + 0.1], color: 'cyan', type: 'DecalRoad arrow' },
-      north: { position: [511.5, 767.5, TERRAIN_ELEVATION + 0.1], color: 'magenta', type: 'DecalRoad arrow' },
+      SW: { position: [64, 64, 0], color: 'red', type: 'DecalRoad cross' },
+      SE: { position: [959, 64, 0], color: 'green', type: 'DecalRoad cross' },
+      NW: { position: [64, 959, 0], color: 'blue', type: 'DecalRoad cross' },
+      NE: { position: [959, 959, 0], color: 'yellow', type: 'DecalRoad cross' },
+      centre: { position: [511.5, 511.5, 0], color: 'white', type: 'DecalRoad cross' },
+      east: { position: [900, 511.5, 0], color: 'cyan', type: 'DecalRoad arrow' },
+      north: { position: [511.5, 900, 0], color: 'magenta', type: 'DecalRoad arrow' },
     },
     expectedScreenshotCriteria: {
-      'correct_mapping': 'BLUE image NW at world (16,1007), YELLOW image NE at world (1007,1007), RED image SW at world (16,16), GREEN image SE at world (1007,16)',
-      'flipped_X': 'BLUE image NW at world (1007,1007), YELLOW image NE at world (16,1007), RED image SW at world (1007,16), GREEN image SE at world (16,16)',
-      'flipped_Y': 'BLUE image NW at world (16,16), YELLOW image NE at world (1007,16), RED image SW at world (16,1007), GREEN image SE at world (1007,1007)',
-      'flipped_XY': 'BLUE image NW at world (1007,16), YELLOW image NE at world (16,16), RED image SW at world (1007,1007), GREEN image SE at world (16,1007)',
+      'correct_mapping': 'BLUE image NW at world (64,959), YELLOW image NE at world (959,959), RED image SW at world (64,64), GREEN image SE at world (959,64)',
+      'flipped_X': 'BLUE image NW at world (959,959), YELLOW image NE at world (64,959), RED image SW at world (959,64), GREEN image SE at world (64,64)',
+      'flipped_Y': 'BLUE image NW at world (64,64), YELLOW image NE at world (959,64), RED image SW at world (64,959), GREEN image SE at world (959,959)',
+      'flipped_XY': 'BLUE image NW at world (959,64), YELLOW image NE at world (64,64), RED image SW at world (959,959), GREEN image SE at world (64,959)',
     },
     zipPath,
     zipHash,
