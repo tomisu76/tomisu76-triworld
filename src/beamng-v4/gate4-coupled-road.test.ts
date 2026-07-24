@@ -13,6 +13,7 @@ import {
   parseDaeVerticesAndAuditClearance,
   type RoadSurfaceMeshResult,
 } from './road-mesh-exporter';
+import { resolveAuthoritativeSumoRoadAlignment } from './sumo-road-source';
 const SIZE = 1024;
 const SQUARE_SIZE = 1.0;
 const ROAD_WIDTH_METRES = 8;
