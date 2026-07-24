@@ -178,7 +178,7 @@ describe('Civil Engineering Road Topology & Canonical Terrain Pipeline', () => {
     const index = new SpatialRoadIndex(50, [way1, way2]);
     const meshRes = buildEngineeredRoadMesh([way1, way2], index, elev);
 
-    const way1VertCount = way1.stations.length * 2;
+    const way1VertCount = way1.stations.length * 7;
     for (let i = 0; i < meshRes.mesh.indices.length; i += 3) {
       const a = meshRes.mesh.indices[i];
       const b = meshRes.mesh.indices[i + 1];
