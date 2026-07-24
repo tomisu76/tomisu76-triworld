@@ -66,8 +66,20 @@ export function canonicalizeSumoDirection(lane: SumoLaneGeometry): CanonicalSumo
 export function resampleSumoShapeGlobal(
   shape: readonly Vec2[],
   defaultStationSpacing: number = 1.0,
+  tangentSmoothingHalfWindowMetres: number = 0.35,
 ): SumoPlanStation[] {
   if (shape.length < 2) return [];
+  if (!Number.isFinite(defaultStationSpacing) || defaultStationSpacing <= 0) {
+    throw new RangeError(
+      `defaultStationSpacing must be finite and > 0, received ${defaultStationSpacing}.`,
+    );
+  }
+  if (!Number.isFinite(tangentSmoothingHalfWindowMetres) || tangentSmoothingHalfWindowMetres <= 0) {
+    throw new RangeError(
+      `tangentSmoothingHalfWindowMetres must be finite and > 0, ` +
+      `received ${tangentSmoothingHalfWindowMetres}.`,
+    );
+  }
 
   // Filter zero-length consecutive duplicates (< 1e-4 m)
   const clean: Vec2[] = [shape[0]];
@@ -132,8 +144,11 @@ export function resampleSumoShapeGlobal(
     const clampedS = Math.min(totalLength, Math.max(0, sTarget));
     const pt = samplePolylinePoint(clean, cumDist, clampedS);
 
-    // Compute smooth tangent using continuous central difference +/- 0.35m
-    const deltaS = 0.35;
+    // Compute a civil-style smoothed tangent using a configurable continuous
+    // arc-length window. Gate 3 retains the historical 0.35m window. Gate 4
+    // uses a wider window so a polyline source vertex cannot rotate the full
+    // road cross-section within a single one-metre station.
+    const deltaS = tangentSmoothingHalfWindowMetres;
     const sBack = Math.max(0, clampedS - deltaS);
     const sFwd = Math.min(totalLength, clampedS + deltaS);
 
