@@ -1,0 +1,45 @@
+name: Gate 4 One-Shot World Offset Repair
+
+on:
+  push:
+    branches:
+      - fix/gate4-native-pipeline-v3
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, 'fix(gate4): align road mesh to terrain sample centre') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/gate4-native-pipeline-v3
+          fetch-depth: 0
+      - name: Apply exact half-sample terrain offset
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/beamng-v4/build-gate4-nativev3-cli.ts')
+          text = path.read_text()
+          anchor = 'const MINIMUM_ROAD_LENGTH_METRES = 80;\n'
+          constant = 'const WORLD_OFFSET_METRES = ((SIZE - 1) * SQUARE_SIZE) / 2;\n'
+          if constant not in text:
+              if anchor not in text:
+                  raise SystemExit('constant insertion anchor not found')
+              text = text.replace(anchor, anchor + constant, 1)
+          replacements = text.count('SIZE / 2')
+          if replacements == 0:
+              raise SystemExit('no SIZE / 2 expressions found')
+          text = text.replace('SIZE / 2', 'WORLD_OFFSET_METRES')
+          path.write_text(text)
+          print(f'replaced {replacements} half-grid expressions')
+          PY
+      - name: Commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/beamng-v4/build-gate4-nativev3-cli.ts
+          git commit -m 'fix(gate4): align road mesh to terrain sample centre'
+          git push origin HEAD:fix/gate4-native-pipeline-v3
